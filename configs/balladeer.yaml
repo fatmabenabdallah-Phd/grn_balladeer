@@ -1,0 +1,46 @@
+# Dataset-specific config for BALLADEER.
+# To reuse grn_balladeer on another dataset: copy this file
+# (e.g. configs/my_other_dataset.yaml), adapt it, and do NOT touch the
+# code in model/, losses/, connectivity/ (dataset-agnostic).
+
+dataset_name: BALLADEER
+
+paths:
+  drive_dataset_dir: "/content/drive/MyDrive/BALLADEER ADHD DATASET"
+  demographics: "users_demographics.json"
+  embraceplus: "balladeer_embraceplus_data.csv"
+  slackline_flags: "slackline_flags_info.json"
+
+labels:
+  field: diagnosed          # never 'group' — see Module 1
+  positive_value: "yes"
+  negative_value: "no"
+  exclude_values: ["undetermined"]
+
+demographics_schema:
+  gender_map: {1: male, 2: female}
+  group_map: {1: Experimental, 2: Control}
+  age_bins: [5, 9, 12, 15, 19]
+  age_bin_labels: ["6-9", "10-12", "13-15", "16-18"]
+
+eeg_devices:
+  cgx:
+    n_channels: 30
+    sfreq_hz: 500  # to be confirmed definitively (Module 2a in progress)
+  emotiv:
+    n_channels: 14
+    sfreq_hz_target: 128
+
+  common_channels:  # confirmed intersection (Module 2a)
+    - F7
+    - F3
+    - FC5
+    - T7
+    - P7
+    - O1
+    - O2
+    - P8
+    - T8
+    - FC6
+    - F4
+    - F8
