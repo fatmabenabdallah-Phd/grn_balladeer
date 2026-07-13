@@ -27,11 +27,27 @@ def notch_filter(raw: mne.io.Raw, freqs: List[float] = None) -> mne.io.Raw:
     """Removes powerline noise. Default targets 50 Hz + its first
     harmonic (100 Hz) — Tunisia uses 50 Hz mains, NOT 60 Hz. Adjust if
     recordings were made on 60 Hz-mains hardware/location.
+
+    Frequencies at or above the Nyquist limit (sfreq/2) are automatically
+    dropped rather than raising — this matters in practice: CGX at
+    500 Hz can notch both 50 and 100 Hz, but Emotiv EPOCX at 128 Hz
+    (Nyquist 64 Hz) can only notch 50 Hz, not its 100 Hz harmonic.
+
     Returns a filtered COPY."""
     if freqs is None:
         freqs = [50.0, 100.0]
+    nyquist = raw.info["sfreq"] / 2.0
+    valid_freqs = [f for f in freqs if f < nyquist]
+    dropped = [f for f in freqs if f >= nyquist]
+    if dropped:
+        print(
+            f"notch_filter: dropping {dropped} Hz (>= Nyquist {nyquist:.1f} Hz "
+            f"at sfreq={raw.info['sfreq']:.1f} Hz) — kept {valid_freqs}"
+        )
+    if not valid_freqs:
+        return raw.copy()
     raw_filtered = raw.copy()
-    raw_filtered.notch_filter(freqs=freqs, verbose=False)
+    raw_filtered.notch_filter(freqs=valid_freqs, verbose=False)
     return raw_filtered
 
 

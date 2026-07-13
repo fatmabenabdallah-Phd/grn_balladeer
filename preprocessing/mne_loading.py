@@ -89,11 +89,18 @@ def check_cgx_packet_integrity(packet_counter: np.ndarray, wrap_at: int = 128) -
     }
 
 
-def load_eeg_cgx(filepath: str) -> mne.io.Raw:
+def load_eeg_cgx(filepath: str, include_exg_as_eog: bool = True) -> mne.io.Raw:
     """Loads a raw CGX csv export into an mne.Raw object with a standard
     10-20 montage restricted to the channels actually present. Runs an
     integrity check on the Packet Counter and raises if real packet loss
-    is detected (not just the normal 0-127 wraparound)."""
+    is detected (not just the normal 0-127 wraparound).
+
+    If include_exg_as_eog=True (default), the two auxiliary 'ExG 1'/'ExG 2'
+    channels are also loaded and typed as 'eog' — this is a WORKING
+    ASSUMPTION (the roadmap notes ExG can serve as an EOG/ECG reference,
+    exact electrode placement not yet confirmed) — used by
+    run_ica_artifact_removal for automatic blink-component detection.
+    """
     df = pd.read_csv(filepath)
 
     integrity = check_cgx_packet_integrity(df["Packet Counter"].values)
@@ -112,10 +119,21 @@ def load_eeg_cgx(filepath: str) -> mne.io.Raw:
     if missing:
         raise ValueError(f"CGX file {filepath} is missing expected channel columns: {missing}")
 
-    data_uv = df[eeg_cols].to_numpy().T  # (n_channels, n_samples), in microvolts
+    ch_names = list(CGX_CHANNELS)
+    ch_types = ["eeg"] * len(CGX_CHANNELS)
+    cols = list(eeg_cols)
+
+    exg_cols = [c for c in ["ExG 1(uV)", "ExG 2(uV)"] if c in df.columns]
+    if include_exg_as_eog and exg_cols:
+        for c in exg_cols:
+            ch_names.append(c.replace("(uV)", ""))
+            ch_types.append("eog")
+            cols.append(c)
+
+    data_uv = df[cols].to_numpy().T  # (n_channels, n_samples), in microvolts
     data_v = data_uv * 1e-6  # MNE expects volts
 
-    info = mne.create_info(ch_names=CGX_CHANNELS, sfreq=sfreq, ch_types="eeg")
+    info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
     raw = mne.io.RawArray(data_v, info, verbose=False)
 
     montage = mne.channels.make_standard_montage("standard_1020")
