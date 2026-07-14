@@ -7,6 +7,7 @@ GRN pipeline for EEG-based ADHD classification (BALLADEER project).
 ```
 grn_balladeer/
 ├── data/          # Module 1 — labels, demographics mapping, stratified split
+├── preprocessing/ # Module 2b — MNE loading (CGX/Emotiv), validated on real UB0004 files
 ├── connectivity/  # Module 3 — PLV, magnetic Laplacian (coming soon)
 ├── model/         # Module 4-6 — CQT, GRNEncoder, classification head (coming soon)
 ├── losses/        # Module 7, 7b — harmonic, symbolic, triplet (coming soon)
@@ -41,7 +42,22 @@ notebook, not inside the container.
 
 - [x] Module 1 (labels) — verified on the 158 real records
 - [x] Module 2a (CGX/Emotiv channels confirmed)
-- [x] Module 10 (SVM/RF/theta-beta ratio baselines) — code ready, awaiting
-      preprocessed epochs (Module 2b) to actually run
-- [ ] Module 2b, 3, 4-9, 11-13
+- [x] Module 2b — COMPLETE (Week 1 closed):
+      - MNE loading (CGX/Emotiv), validated on real UB0004 + UB0136 files
+      - bandpass/notch filtering (Nyquist bug found and fixed for
+        low-sfreq devices)
+      - ICA artifact removal (EOG-reference path for CGX via ExG, frontal
+        -proxy fallback for Emotiv)
+      - TAGS parsing + event-to-EEG alignment (general_time hypothesis
+        empirically validated: 100% of 76 real UB0136 events within 1s of
+        the matching slackline_flags_info.json flag; same-subject sample
+        -range check also consistent, though not yet a full proof)
+      - stimulus-locked epoching (33 real epochs produced from UB0136,
+        4 flag types correctly separated)
+      - Emotiv channel quality mask (CQ.*, validated on real UB0004 data)
+      - CGX motion amplitude (validated, but accelerometer unit scaling
+        is unclear — see caveat in quality_and_motion.py)
+- [x] Module 10 (SVM/RF/theta-beta ratio baselines) — code ready, can now
+      be run on real epoched data produced by Module 2b
+- [ ] Module 3-9, 11-13 (Week 2 onward)
 
