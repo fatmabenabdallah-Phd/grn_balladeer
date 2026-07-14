@@ -19,14 +19,18 @@ estimated spawn=59.66, closest real flag at t=60s). This confirms
 generalTime is session/level-relative time (seconds since the level
 started), the same domain used by the game engine to schedule flags.
 
-WORKING ASSUMPTION (NOT YET CROSS-VALIDATED — flagged explicitly):
+WORKING ASSUMPTION (partially checked, not fully proven — flagged explicitly):
 this module assumes the EEG recording's own t=0 (raw.times[0]) coincides
-with generalTime=0 (session start). This has NOT been verified against
-a matched CGX+TAGS pair for the same subject/session in this codebase —
-the CGX file available so far (UB0004) and this TAGS file (UB0136) are
-from different subjects and cannot be cross-checked against each other.
-Confirm this assumption on a same-subject CGX+TAGS pair before trusting
-epoch boundaries produced from this alignment in any real analysis.
+with generalTime=0 (session start). A same-subject check was run on
+UB0136 (first 20s of real CGX data + real TAGS): the 4 events whose
+general_time falls within that 20s window map to sample indices well
+within [0, n_samples), consistent with the assumption — but this only
+checks that indices land in-range, not that the alignment is precisely
+correct sample-for-sample (e.g. no independent ERP-based or
+protocol-documentation confirmation yet). Treat as "not contradicted",
+not as "proven" — a stronger check (visible ERP pattern, or explicit
+acquisition-protocol documentation of the trigger) is still worth doing
+before relying on exact epoch boundaries in the final analysis.
 """
 
 from __future__ import annotations
