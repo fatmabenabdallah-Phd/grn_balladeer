@@ -70,3 +70,23 @@ def build_resonance_head(embedding_dim: int) -> nn.Linear:
     """Constructs the g_theta head matching extract_resonance_frequency's
     expected input size (2*embedding_dim, from concatenated Re/Im)."""
     return nn.Linear(2 * embedding_dim, 1)
+
+
+def fixed_consonance_prior(
+    f_i: torch.Tensor, f_j: torch.Tensor, ratios: List[float], sigma: float
+) -> torch.Tensor:
+    """Option B (ablation counterpart to the learned omega_i from
+    extract_resonance_frequency): injects a FIXED, non-learned
+    consonance prior directly into the edge weighting, using known
+    frequencies (e.g. EEG band center frequencies) instead of a
+    learned g_theta output.
+
+    Same functional form as Module 7's compute_consonance_degree:
+    mu_ij = exp(-min_k|f_i/f_j - rho_k|^2 / sigma^2). f_i, f_j: (n_pairs,)
+    real tensors of fixed frequencies. Returns (n_pairs,) in [0, 1].
+    """
+    ratio = f_i / f_j
+    ratios_t = torch.tensor(ratios, dtype=ratio.dtype, device=ratio.device)
+    diffs_sq = (ratio.unsqueeze(-1) - ratios_t) ** 2  # (n_pairs, n_ratios)
+    min_diff_sq = diffs_sq.min(dim=-1).values
+    return torch.exp(-min_diff_sq / (sigma**2))
