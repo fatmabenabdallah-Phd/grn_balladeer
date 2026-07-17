@@ -5,11 +5,26 @@ Module 7 — harmonic loss (Option A: learned omega_i from
 extract_resonance_frequency) and the shared consonance-degree helper
 reused by both the hard loss here and the soft symbolic loss.
 
-WORKING ASSUMPTION flagged for confirmation: CONSONANCE_RATIOS below is
-a standard musical-consonance set (unison, major third, fourth, fifth,
-octave). It has not yet been cross-checked against a specific literature
-source (e.g. Sanchis et al. Heliyon 2024) for this exact list/ordering -
-treat as a placeholder until confirmed, not as a validated constant.
+CONSONANCE_RATIOS grounded in the cross-frequency phase synchrony (CFS)
+literature, not musical-consonance theory (the original placeholder was
+[1.0, 1.25, 1.333, 1.5, 2.0], borrowed from Western tuning theory with
+no neuroscience backing — replaced after literature research):
+
+Palva, Palva & Kaila (2005, J Neurosci) and Palva & Palva (2007, 2012,
+2018) define n:m cross-frequency phase synchrony as n*f_high = m*f_low —
+exactly the ratio-to-integer comparison this loss performs, but with EEG/
+MEG evidence behind it. Empirically (Palva et al. 2005a, MEG, mental
+arithmetic task): 1:1 phase synchrony within alpha/beta/gamma bands;
+alpha:beta networks synchronized at 1:2; alpha:gamma at 1:3-1:4
+depending on working-memory load.
+
+1.0 (unison/1:1) is KEPT despite being a real degeneracy risk (an
+untrained/collapsed omega trivially satisfies it) because it is itself a
+real, evidenced coupling ratio in this literature, not an artifact of
+musical theory — removing it would make the ratio set less
+neuroscientifically grounded, not more. The actual risk (omega collapse)
+is instead caught by monitoring std(omega) during training (Module 9),
+not by removing a real ratio from the set.
 """
 
 from __future__ import annotations
@@ -18,7 +33,7 @@ from typing import List, Tuple
 
 import torch
 
-CONSONANCE_RATIOS: List[float] = [1.0, 1.25, 1.333, 1.5, 2.0]
+CONSONANCE_RATIOS: List[float] = [1.0, 2.0, 3.0, 4.0]
 
 
 def compute_consonance_degree(
