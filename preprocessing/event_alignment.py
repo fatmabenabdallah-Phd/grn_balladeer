@@ -50,25 +50,51 @@ def parse_tags_file(filepath: str) -> pd.DataFrame:
     columns alongside the original 'timestamp' (Unix ms, game-client
     clock — kept for reference, not used for EEG alignment).
 
-    Returns a DataFrame with columns: timestamp_ms, reacted, reaction_time,
-    correct, duplicated, flag_type, general_time, focus.
+    THIS IS THE CANONICAL parse_tags_file FOR THE PACKAGE. A second,
+    near-duplicate implementation previously lived in
+    training/behavioral_features.py (camelCase columns, e.g. 'flagType'
+    instead of 'flag_type') — that copy has been removed; import this
+    function from there instead. See docstring note in
+    training/behavioral_features.py.
+
+    Per-row parsing errors are skipped (not raised), matching the more
+    defensive behavior of the former training/behavioral_features.py copy
+    — a single malformed TAGS row should not abort loading an otherwise
+    valid session.
+
+    Returns a DataFrame with columns: timestamp_ms, general_time,
+    reaction_time, reacted, correct, duplicated, flag_type, focus.
+    flag_type=-1 rows are NOT filtered here (that is caller-specific
+    business logic, e.g. align_events_to_eeg / extract_behavioral_features
+    each decide independently whether/how to exclude them).
     """
     df = pd.read_csv(filepath)
-    parsed = df["value"].apply(ast.literal_eval)
-    events = [p["reactionOrOmission"][0] for p in parsed]
-    events_df = pd.DataFrame(events)
+    records: list[dict] = []
 
-    events_df = events_df.rename(
-        columns={"reactionTime": "reaction_time", "generalTime": "general_time", "flagType": "flag_type"}
+    for _, row in df.iterrows():
+        try:
+            v = ast.literal_eval(row["value"])
+            r = v["reactionOrOmission"][0]
+        except (KeyError, IndexError, ValueError, SyntaxError, TypeError):
+            continue
+
+        _rt = r.get("reactionTime", None)
+        records.append({
+            "timestamp_ms":    float(row["timestamp"]),
+            "general_time":    float(r["generalTime"]),
+            "reaction_time":   float(_rt) if _rt is not None else np.nan,
+            "reacted":         r["reacted"] == "True",
+            "correct":         r["correct"] == "True",
+            "duplicated":      r["duplicated"] == "True",
+            "flag_type":       int(r["flagType"][0]),
+            "focus":           r["focus"],
+        })
+
+    return pd.DataFrame(
+        records,
+        columns=["timestamp_ms", "general_time", "reaction_time", "reacted",
+                 "correct", "duplicated", "flag_type", "focus"],
     )
-    events_df["timestamp_ms"] = df["timestamp"].values
-    events_df["reacted"] = events_df["reacted"].map({"True": True, "False": False})
-    events_df["correct"] = events_df["correct"].map({"True": True, "False": False})
-    events_df["duplicated"] = events_df["duplicated"].map({"True": True, "False": False})
-
-    return events_df[
-        ["timestamp_ms", "general_time", "reaction_time", "reacted", "correct", "duplicated", "flag_type", "focus"]
-    ]
 
 
 def align_events_to_eeg(

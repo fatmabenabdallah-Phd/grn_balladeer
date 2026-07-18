@@ -11,57 +11,31 @@ VALIDATED on real data (2026-07-18):
 ADHD-literature grounding for these features:
   - RT mean + std: ADHD associated with slower and more variable reaction
     times (Lijffijt et al. 2005 meta-analysis, d=0.68 for RT variability).
-  - Commission rate (flagType=-1 events): impulsivity proxy.
+  - Commission rate (flag_type=-1 events): impulsivity proxy.
   - Focus ratio (gaze on target at response time): attentional engagement.
 
-IMPORTANT — flagType=-1 handling:
+IMPORTANT — flag_type=-1 handling:
   These events are NOT documented in the BALLADEER README but appear in
   real data. They always have correct=False and appear to be commission
   errors (response to a non-target). They are EXCLUDED from RT/accuracy
   computation but counted separately as commission_rate.
 """
 
-import ast
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Optional
 
+from grn_balladeer.preprocessing.event_alignment import parse_tags_file
+
 # Fixed output dimension — must match AuxBranchEncoder behavioral_input_dim
 BEHAVIORAL_FEATURE_DIM = 6
 
-
-def parse_tags_file(tags_path: str) -> pd.DataFrame:
-    """
-    Load and parse a raw TAGS CSV file.
-
-    The 'value' column is a Python dict literal (single-quoted) —
-    ast.literal_eval is required, NOT json.loads.
-
-    Returns
-    -------
-    pd.DataFrame with columns:
-        timestamp_ms, reacted, reactionTime, correct,
-        flagType, generalTime, focus
-    """
-    df = pd.read_csv(tags_path)
-    records = []
-    for _, row in df.iterrows():
-        try:
-            v = ast.literal_eval(row["value"])
-            r = v["reactionOrOmission"][0]
-        except (KeyError, IndexError, ValueError, SyntaxError) as e:
-            continue
-        records.append({
-            "timestamp_ms":  float(row["timestamp"]),
-            "reacted":       r["reacted"] == "True",
-            "reactionTime":  float(r.get("reactionTime", np.nan)),
-            "correct":       r["correct"] == "True",
-            "flagType":      int(r["flagType"][0]),
-            "generalTime":   float(r["generalTime"]),
-            "focus":         r["focus"],
-        })
-    return pd.DataFrame(records)
+# NOTE: parse_tags_file used to be duplicated here with camelCase columns
+# (flagType, reactionTime, generalTime). It is now imported from
+# preprocessing/event_alignment.py, the canonical implementation, which
+# uses snake_case columns (flag_type, reaction_time, general_time) instead.
+# extract_behavioral_features below has been updated accordingly.
 
 
 def extract_behavioral_features(
@@ -74,15 +48,15 @@ def extract_behavioral_features(
     Features:
         0  rt_mean         : mean reaction time (s) over valid, reacted trials
         1  rt_std          : std of reaction time (intra-individual variability)
-        2  accuracy        : fraction correct over valid trials (flagType != -1)
+        2  accuracy        : fraction correct over valid trials (flag_type != -1)
         3  omission_rate   : fraction of valid trials with no response
-        4  commission_rate : fraction of all events with flagType=-1
+        4  commission_rate : fraction of all events with flag_type=-1
         5  focus_ratio     : fraction of reacted trials where gaze was on target
 
     Parameters
     ----------
     tags_df          : output of parse_tags_file()
-    min_valid_events : minimum number of flagType!=-1 events required;
+    min_valid_events : minimum number of flag_type!=-1 events required;
                        returns None if fewer (session too short/broken)
 
     Returns
@@ -94,14 +68,14 @@ def extract_behavioral_features(
     if tags_df is None or len(tags_df) == 0:
         return None
 
-    # Valid trials: exclude undocumented flagType=-1 commission-error events
-    valid = tags_df[tags_df["flagType"] != -1].copy()
+    # Valid trials: exclude undocumented flag_type=-1 commission-error events
+    valid = tags_df[tags_df["flag_type"] != -1].copy()
     if len(valid) < min_valid_events:
         return None
 
     # ── Reaction time ────────────────────────────────────────────────────
     reacted = valid[valid["reacted"]]
-    rt = reacted["reactionTime"].dropna().values
+    rt = reacted["reaction_time"].dropna().values
 
     if len(rt) == 0:
         rt_mean = np.nan
@@ -117,8 +91,8 @@ def extract_behavioral_features(
     accuracy      = float(valid["correct"].mean())
     omission_rate = float((~valid["reacted"]).mean())
 
-    # ── Commission rate (flagType=-1 events / all events) ────────────────
-    commission_rate = float((tags_df["flagType"] == -1).sum()) / len(tags_df)
+    # ── Commission rate (flag_type=-1 events / all events) ────────────────
+    commission_rate = float((tags_df["flag_type"] == -1).sum()) / len(tags_df)
 
     # ── Visual attention (focus on target at response time) ──────────────
     if len(reacted) == 0:

@@ -24,11 +24,11 @@ from typing import List, Tuple
 import numpy as np
 import torch
 
-from preprocessing.mne_loading import load_eeg_cgx, CGX_CHANNELS
-from preprocessing.filtering import apply_standard_filters
-from preprocessing.ica import run_ica_artifact_removal
-from preprocessing.epoching import flags_to_samples, epoch_by_flag_events
-from connectivity.phase_connectivity import (
+from grn_balladeer.preprocessing.mne_loading import load_eeg_cgx, CGX_CHANNELS
+from grn_balladeer.preprocessing.filtering import apply_standard_filters
+from grn_balladeer.preprocessing.ica import run_ica_artifact_removal
+from grn_balladeer.preprocessing.epoching import flags_to_samples, epoch_by_flag_events
+from grn_balladeer.connectivity.phase_connectivity import (
     extract_band_signal,
     compute_instantaneous_phase,
     compute_plv_matrix,
@@ -36,8 +36,8 @@ from connectivity.phase_connectivity import (
     build_complex_edge_weights,
     build_magnetic_laplacian,
 )
-from model.magnetic_laplacian_conv import compute_normalized_laplacian
-from model.cqt_encoder import compute_cqt_features, pool_cqt_to_node_features, build_node_feature_matrix
+from grn_balladeer.model.magnetic_laplacian_conv import compute_normalized_laplacian
+from grn_balladeer.model.cqt_encoder import compute_cqt_features, pool_cqt_to_node_features, build_node_feature_matrix
 
 
 def build_subject_dataset(
