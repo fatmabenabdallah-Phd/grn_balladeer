@@ -1,191 +1,146 @@
 """
-grn_balladeer/losses/triplet_loss.py
+grn_balladeer.losses.triplet_loss
 =====================================
-Batch-hard triplet mining and triplet loss for the dual-branch GRN.
+Module 7b / 8 — triplet loss on z_fused (pooled, real-valued graph-level
+embeddings), with batch-hard mining under an explicit anti-identity-leak
+rule: anchor and positive MUST come from different subjects (same
+class, different subject). Without this rule, the easiest "positive"
+match is trivially the same subject's other epochs (shared EEG
+idiosyncrasies), which the triplet loss would then reinforce as if it
+were ADHD-relevant signal - literally the same subject-identity
+confound flagged repeatedly this session, but baked into the loss
+function instead of just the train/val split.
 
-Operates on L2-normalised joint embeddings (z_joint) produced by
-CrossAttentionFusion. Uses cosine distance (= L2 on unit sphere).
-
-ANTI-IDENTITY-LEAK RULE (critical — do not remove):
-    Anchor and positive must be: same class label AND different subject_id.
-    Without this, the model can learn subject-specific EEG fingerprints
-    (biometrically decodable at >80% in the literature) instead of ADHD
-    biomarkers. A high triplet accuracy without this rule could mean
-    "learned UB0136's EEG identity", not "learned ADHD."
-
-BUG FIXED during validation (2026-07-18):
-    make_pk_batches originally grouped by class separately → each batch
-    contained only ONE class → no valid negatives → all anchors skipped,
-    loss=0. Fixed: batches now always contain ALL classes together.
-
-VALIDATED on real 4-subject scenario (2026-07-18):
-    132 embeddings (33 epochs × 4 subjects, 2/class):
-    - Full batch: loss=1.4123, active=132/132, skipped=0 ✓
-    - Gradient flows to embeddings ✓
-    - Single-subject/class edge case: all skipped, loss=0.0 ✓
-    - PK batch (fixed): shape [132,64], both classes, active=132/132 ✓
-    - Anti-identity-leak: holds over 100 random anchors ✓
-
-References:
-    Schroff et al. (2015) FaceNet — batch-hard mining.
-    Hermans et al. (2017) In Defense of the Triplet Loss.
+First real test of this rule needed >= 2 subjects/class - available
+this session (UB0004, UB0022 = Control; UB0136, UB0023 = ADHD).
 """
 
-import random
+from __future__ import annotations
+
+from typing import Dict, List, Tuple
+
+import numpy as np
 import torch
-from dataclasses import dataclass
-from typing import List, Tuple
-
-
-@dataclass
-class TripletMiningReport:
-    """Diagnostics returned alongside the triplet loss."""
-    n_anchors:       int
-    n_skipped:       int    # anchors with no valid positive or negative
-    n_active:        int    # anchors that contributed to the loss
-    mean_d_ap:       float  # mean anchor-positive distance
-    mean_d_an:       float  # mean anchor-negative distance
-    fraction_active: float  # n_active / n_anchors
-
-
-def mine_batch_hard_triplets(
-    embeddings:  torch.Tensor,
-    labels:      torch.Tensor,
-    subject_ids: List[str],
-    margin:      float = 0.3,
-) -> Tuple[torch.Tensor, TripletMiningReport]:
-    """
-    Batch-hard triplet mining with anti-identity-leak constraint.
-
-    For every anchor i:
-      - Hardest positive j : same label, DIFFERENT subject_id, max distance
-      - Hardest negative k : different label, any subject, min distance
-      - Loss contribution  : max(0, d(i,j) - d(i,k) + margin)
-
-    Anchors with no valid positive OR no valid negative are silently
-    skipped (contribution = 0, not NaN). Use make_pk_batches() to ensure
-    at least 2 subjects per class in every batch.
-
-    Parameters
-    ----------
-    embeddings  : [N, D] L2-normalised joint embeddings from CrossAttentionFusion
-    labels      : [N]   class labels (long), 0=Control / 1=ADHD
-    subject_ids : [N]   subject ID strings (e.g. 'UB0136')
-    margin      : triplet margin α (default 0.3, tune in Phase 4)
-
-    Returns
-    -------
-    loss   : scalar tensor — mean over active anchors (differentiable)
-    report : TripletMiningReport
-    """
-    N = embeddings.shape[0]
-
-    # Cosine distance on unit sphere: d = 2*(1 - cos_sim) ∈ [0, 4]
-    sim  = embeddings @ embeddings.T    # [N, N]
-    dist = 2.0 * (1.0 - sim)           # [N, N]
-
-    triplet_losses: List[torch.Tensor] = []
-    d_aps: List[float] = []
-    d_ans: List[float] = []
-    n_skipped = 0
-
-    for i in range(N):
-        # Valid positive: same class, DIFFERENT subject (anti-leak rule)
-        pos_mask = torch.tensor(
-            [bool(labels[j] == labels[i]) and subject_ids[j] != subject_ids[i]
-             for j in range(N)],
-            dtype=torch.bool,
-            device=embeddings.device,
-        )
-        neg_mask = (labels != labels[i])   # [N]
-
-        if pos_mask.sum() == 0 or neg_mask.sum() == 0:
-            n_skipped += 1
-            continue
-
-        # Hardest positive (max distance among valid)
-        d_pos = dist[i].clone()
-        d_pos[~pos_mask] = -1.0
-        d_ap = dist[i, d_pos.argmax()]
-
-        # Hardest negative (min distance among valid)
-        d_neg = dist[i].clone()
-        d_neg[~neg_mask] = 9999.0
-        d_an = dist[i, d_neg.argmin()]
-
-        triplet_losses.append(torch.clamp(d_ap - d_an + margin, min=0.0))
-        d_aps.append(d_ap.item())
-        d_ans.append(d_an.item())
-
-    n_active = len(triplet_losses)
-
-    if n_active == 0:
-        loss = torch.tensor(0.0, requires_grad=True, device=embeddings.device)
-    else:
-        loss = torch.stack(triplet_losses).mean()
-
-    report = TripletMiningReport(
-        n_anchors=N,
-        n_skipped=n_skipped,
-        n_active=n_active,
-        mean_d_ap=float(sum(d_aps) / n_active) if n_active > 0 else 0.0,
-        mean_d_an=float(sum(d_ans) / n_active) if n_active > 0 else 0.0,
-        fraction_active=n_active / N,
-    )
-
-    return loss, report
+import torch.nn.functional as F
 
 
 def make_pk_batches(
-    embeddings:  torch.Tensor,
-    labels:      torch.Tensor,
-    subject_ids: List[str],
-    K:           int  = 4,
-    seed:        int  = None,
-) -> List[Tuple[torch.Tensor, torch.Tensor, List[str]]]:
+    subject_ids: List[str], labels: np.ndarray, P: int, K: int, seed: int = 42
+) -> List[List[int]]:
+    """P-K batch sampler: each batch contains P subjects x K samples/
+    subject (indices into the original arrays), so every batch has
+    enough same-subject AND cross-subject same-class pairs for
+    mine_batch_hard_triplets to find valid anchor/positive/negative
+    triplets without the anti-leak rule starving the batch.
+
+    subject_ids: (n_samples,) subject id per sample (multiple epochs per
+        subject expected). labels: (n_samples,) class label per sample.
+    P: number of DISTINCT subjects per batch (not classes - a batch can
+        mix subjects from different classes, mine_batch_hard_triplets
+        handles same-class negatives itself).
+    K: number of samples per chosen subject, drawn WITHOUT replacement if
+        the subject has >= K samples, WITH replacement otherwise.
+
+    Returns a list of batches, each a list of sample indices (length
+    P*K).
     """
-    Build mixed PK batches where ALL classes are represented together.
+    rng = np.random.default_rng(seed)
+    subject_ids_arr = np.array(subject_ids)
+    unique_subjects = sorted(set(subject_ids))
 
-    Each batch contains K subjects from EVERY available class (P is always
-    the number of unique classes — 2 for ADHD/Control). With our current
-    4-subject dataset (2/class), K is automatically capped at 2.
+    if len(unique_subjects) < P:
+        raise ValueError(
+            f"make_pk_batches: only {len(unique_subjects)} distinct subjects available, "
+            f"need at least P={P}."
+        )
 
-    IMPORTANT: batches must contain both classes for mine_batch_hard_triplets
-    to find valid negatives. Single-class batches produce loss=0 (all
-    anchors skipped) — this was the original bug, now fixed.
+    subject_to_indices = {s: np.where(subject_ids_arr == s)[0] for s in unique_subjects}
 
-    Parameters
-    ----------
-    K    : subjects per class per batch (capped at available count)
-    seed : random seed for reproducible subject selection
+    shuffled_subjects = list(unique_subjects)
+    rng.shuffle(shuffled_subjects)
 
-    Returns
-    -------
-    List of (embeddings_batch, labels_batch, subject_ids_batch) — each
-    tuple contains all epochs for K subjects per class, both classes mixed.
+    batches = []
+    for i in range(0, len(shuffled_subjects), P):
+        chosen_subjects = shuffled_subjects[i : i + P]
+        if len(chosen_subjects) < P:
+            break
+        batch_idx = []
+        for s in chosen_subjects:
+            idx_pool = subject_to_indices[s]
+            replace = len(idx_pool) < K
+            chosen = rng.choice(idx_pool, size=K, replace=replace)
+            batch_idx.extend(chosen.tolist())
+        batches.append(batch_idx)
+
+    return batches
+
+
+def mine_batch_hard_triplets(
+    embeddings: torch.Tensor, labels: np.ndarray, subject_ids: List[str]
+) -> List[Tuple[int, int, int]]:
+    """For each sample i (as anchor), finds the HARDEST valid positive
+    (same class, DIFFERENT subject, maximum distance) and the HARDEST
+    valid negative (different class, minimum distance), within the given
+    batch. Skips an anchor if no valid positive exists.
+
+    ANTI-IDENTITY-LEAK RULE: a candidate positive j is valid only if
+    labels[j] == labels[i] AND subject_ids[j] != subject_ids[i].
+
+    Returns a list of (anchor_idx, positive_idx, negative_idx) triplets,
+    at most one per anchor that has a valid positive.
     """
-    if seed is not None:
-        random.seed(seed)
+    n = embeddings.shape[0]
+    labels_arr = np.array(labels)
+    subject_ids_arr = np.array(subject_ids)
 
-    unique_labels = labels.unique().tolist()
+    with torch.no_grad():
+        dists = torch.cdist(embeddings, embeddings, p=2)
 
-    # Map (label, subject_id) → list of epoch indices
-    subject_to_indices: dict = {}
-    for i, (lbl, sid) in enumerate(zip(labels.tolist(), subject_ids)):
-        subject_to_indices.setdefault((int(lbl), sid), []).append(i)
+    triplets = []
+    for i in range(n):
+        same_class = labels_arr == labels_arr[i]
+        diff_subject = subject_ids_arr != subject_ids_arr[i]
+        valid_pos_mask = same_class & diff_subject
+        valid_pos_mask[i] = False
 
-    # Single batch containing K subjects from EACH class (all mixed)
-    batch_indices: List[int] = []
-    for lbl in unique_labels:
-        subs = [sid for (l, sid) in subject_to_indices if l == int(lbl)]
-        k_actual = min(K, len(subs))
-        chosen = random.sample(subs, k_actual)
-        for sid in chosen:
-            batch_indices.extend(subject_to_indices[(int(lbl), sid)])
+        diff_class = labels_arr != labels_arr[i]
+        valid_neg_mask = diff_class
 
-    idx_t = torch.tensor(batch_indices, dtype=torch.long)
-    return [(
-        embeddings[idx_t],
-        labels[idx_t],
-        [subject_ids[i] for i in batch_indices],
-    )]
+        if not valid_pos_mask.any() or not valid_neg_mask.any():
+            continue
+
+        pos_candidates = np.where(valid_pos_mask)[0]
+        neg_candidates = np.where(valid_neg_mask)[0]
+
+        pos_dists = dists[i, pos_candidates]
+        neg_dists = dists[i, neg_candidates]
+
+        hardest_pos = pos_candidates[torch.argmax(pos_dists).item()]
+        hardest_neg = neg_candidates[torch.argmin(neg_dists).item()]
+
+        triplets.append((i, int(hardest_pos), int(hardest_neg)))
+
+    return triplets
+
+
+def triplet_loss(
+    embeddings: torch.Tensor, triplets: List[Tuple[int, int, int]], margin: float = 1.0
+) -> torch.Tensor:
+    """Standard margin triplet loss: mean(relu(d(a,p) - d(a,n) + margin))
+    over the given (anchor, positive, negative) index triplets.
+    """
+    if not triplets:
+        raise ValueError(
+            "triplet_loss: no triplets given - mine_batch_hard_triplets likely found no "
+            "valid (same-class, different-subject) positive for any anchor in this batch. "
+            "Check P/K batch composition (need >= 2 subjects per class in the batch)."
+        )
+
+    anchor_idx = torch.tensor([t[0] for t in triplets], dtype=torch.long)
+    pos_idx = torch.tensor([t[1] for t in triplets], dtype=torch.long)
+    neg_idx = torch.tensor([t[2] for t in triplets], dtype=torch.long)
+
+    d_ap = F.pairwise_distance(embeddings[anchor_idx], embeddings[pos_idx], p=2)
+    d_an = F.pairwise_distance(embeddings[anchor_idx], embeddings[neg_idx], p=2)
+
+    return F.relu(d_ap - d_an + margin).mean()

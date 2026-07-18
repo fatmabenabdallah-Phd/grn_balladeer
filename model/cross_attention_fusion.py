@@ -52,7 +52,10 @@ class CrossAttentionFusion(nn.Module):
 
     def __init__(
         self,
-        hidden_dim: int   = 64,
+        hidden_dim: int   = 16,  # CORRECTED this session: matches the real GRN pooled
+                                  # embedding dim actually used in this project (was 64,
+                                  # validated only against a simulated z_eeg - see
+                                  # aux_branch_encoder.py's DEFAULT_HIDDEN_DIM comment).
         n_heads:    int   = 1,
         dropout:    float = 0.1,
     ) -> None:

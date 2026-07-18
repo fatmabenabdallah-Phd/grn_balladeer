@@ -32,8 +32,16 @@ from typing import Optional
 # Must match eda_features.EDA_FEATURE_DIM + behavioral_features.BEHAVIORAL_FEATURE_DIM
 AUX_INPUT_DIM = 12   # 6 EDA + 6 behavioral
 
-# Must match GRNEncoder hidden_dim (set in grn_encoder.py)
-DEFAULT_HIDDEN_DIM = 64
+# Must match GRNEncoder's ACTUAL pooled output dim used throughout this project.
+# CORRECTED this session: the real GRNEncoder config used everywhere so far
+# (hidden_channels=[16, 8] -> pooled dim = 2*8 = 16 after split_real_imag) produces
+# 16, NOT 64. The original default of 64 was validated only against a SIMULATED
+# z_eeg tensor, not real GRNEncoder output - confirmed by an independent real
+# end-to-end run this session (real GRN + real behavioral + real EDA all the way
+# through fusion) that 16 is the dimension that actually appears in practice.
+# If GRNEncoder's embedding_dim changes later, update this AND re-verify end-to-end
+# rather than assuming a round number is correct.
+DEFAULT_HIDDEN_DIM = 16
 
 
 class AuxBranchEncoder(nn.Module):
