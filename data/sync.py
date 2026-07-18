@@ -1,22 +1,22 @@
 """
 data/sync.py
 ============
-Synchronisation temporelle entre les fichiers EEG CGX (horloge relative,
-secondes depuis le début de session) et les fichiers TAGS (horloge Unix
-absolue, millisecondes).
+Temporal synchronization between the CGX EEG files (relative clock,
+seconds since session start) and the TAGS files (absolute Unix clock,
+milliseconds).
 
-DÉCOUVERTES EMPIRIQUES VALIDÉES sur données réelles UB0136 :
-  - Le timestamp CGX est RELATIF (secondes depuis t=0 de la session).
-  - Les timestamps TAGS sont ABSOLUS (Unix millisecondes, précision sous-ms).
-  - generalTime dans TAGS = temps depuis le début du JEU, pas depuis le début
-    de l'enregistrement EEG → ne pas utiliser comme ancre directe.
-  - L'ancre correcte = timestamp Unix extrait du NOM DE FICHIER EEG (précision
-    à la seconde, suffisante car validée avec std < 20 ms).
-  - Canaux CGX confirmés : 29 EEG (uV) + 3 accéléromètre ACC32/33/34 (mg).
-  - Durée session Slackline Lvl1 confirmée : ~305 s.
-  - flagType=-1 : valeur non documentée, coïncide avec correct=False.
+EMPIRICAL FINDINGS VALIDATED on real UB0136 data:
+  - The CGX timestamp is RELATIVE (seconds since t=0 of the session).
+  - TAGS timestamps are ABSOLUTE (Unix milliseconds, sub-ms precision).
+  - generalTime in TAGS = time since the start of the GAME, not since the
+    start of the EEG recording -> do not use as a direct anchor.
+  - The correct anchor = the Unix timestamp extracted from the EEG FILE
+    NAME (second-level precision, sufficient as validated with std < 20 ms).
+  - Confirmed CGX channels: 29 EEG (uV) + 3 accelerometer ACC32/33/34 (mg).
+  - Confirmed Slackline Lvl1 session duration: ~305 s.
+  - flagType=-1: undocumented value, coincides with correct=False.
 
-Auteur : GRN-BALLADEER project
+Author: GRN-BALLADEER project
 """
 
 import numpy as np
@@ -30,30 +30,30 @@ from typing import Optional, Tuple, Dict, List
 
 logger = logging.getLogger(__name__)
 
-# Fréquence d'échantillonnage CGX (confirmée sur données réelles)
+# CGX sampling rate (confirmed on real data)
 CGX_SFREQ = 500.0  # Hz
 
-# Fuseau horaire Espagne (GMT+1, confirmé dans le nom des fichiers TAGS : +01.00)
+# Spain timezone (GMT+1, confirmed in TAGS file names: +01.00)
 TZ_SPAIN = timezone(timedelta(hours=1))
 
 
 # ---------------------------------------------------------------------------
-# 1. Chargement des fichiers
+# 1. File loading
 # ---------------------------------------------------------------------------
 
 def load_tags(tags_path: str) -> pd.DataFrame:
     """
-    Charge un fichier TAGS et parse le champ JSON 'value'.
+    Loads a TAGS file and parses the JSON-like 'value' field.
 
-    Colonnes en sortie :
-        timestamp_ms  (float) — horloge Unix absolue, millisecondes
-        label         (str)   — toujours 'Marcador', conservé pour traçabilité
+    Output columns:
+        timestamp_ms  (float) — absolute Unix clock, milliseconds
+        label         (str)   — always 'Marcador', kept for traceability
         reacted       (bool)
-        reactionTime  (float) — secondes après apparition du stimulus
+        reactionTime  (float) — seconds after stimulus appearance
         correct       (bool)
         duplicated    (bool)
-        flagType      (int)   — 0=circle,1=square,2=rhombus,3=doubleCircle,-1=inconnu
-        generalTime   (float) — secondes depuis le début du JEU (≠ début EEG)
+        flagType      (int)   — 0=circle,1=square,2=rhombus,3=doubleCircle,-1=unknown
+        generalTime   (float) — seconds since the start of the GAME (!= EEG start)
         focus         (str)   — 'Target' | 'non_focusable'
     """
     df = pd.read_csv(tags_path)
@@ -64,7 +64,7 @@ def load_tags(tags_path: str) -> pd.DataFrame:
             v = ast.literal_eval(row['value'])
             r = v['reactionOrOmission'][0]
         except (KeyError, IndexError, ValueError, SyntaxError) as e:
-            logger.warning("Ligne TAGS non parseable (ignorée) : %s", e)
+            logger.warning("Unparseable TAGS row (skipped): %s", e)
             continue
 
         records.append({
@@ -83,7 +83,7 @@ def load_tags(tags_path: str) -> pd.DataFrame:
 
     n_unknown = (parsed['flagType'] == -1).sum()
     if n_unknown > 0:
-        logger.info("flagType=-1 (non documenté) : %d occurrences dans %s",
+        logger.info("flagType=-1 (undocumented): %d occurrences in %s",
                     n_unknown, tags_path)
 
     return parsed
@@ -91,28 +91,28 @@ def load_tags(tags_path: str) -> pd.DataFrame:
 
 def load_eeg_cgx(eeg_path: str) -> Tuple[np.ndarray, np.ndarray, List[str], Optional[np.ndarray]]:
     """
-    Charge un fichier EEG_CGX.csv.
+    Loads an EEG_CGX.csv file.
 
-    Canaux confirmés sur données réelles :
-        29 canaux EEG avec suffixe '(uV)' : AF7, Fpz, F7, Fz, T7, FC6, Fp1,
+    Channels confirmed on real data:
+        29 EEG channels with suffix '(uV)': AF7, Fpz, F7, Fz, T7, FC6, Fp1,
         F4, C4, Oz, CP6, Cz, PO8, CP5, O2, O1, P3, P4, P7, P8, Pz, PO7,
         T8, C3, Fp2, F3, F8, FC5, AF8.
-        3 canaux accéléromètre : ACC32(mg), ACC33(mg), ACC34(mg).
+        3 accelerometer channels: ACC32(mg), ACC33(mg), ACC34(mg).
 
-    Retourne
-    --------
-    times    : [n_samples]            — timestamps relatifs en secondes
-    data     : [n_samples, n_eeg]     — µV, canaux EEG uniquement
-    channels : list[str]              — noms des canaux EEG (sans accéléromètre)
-    accel    : [n_samples, 3] | None  — données accéléromètre X/Y/Z en mg
+    Returns
+    -------
+    times    : [n_samples]            — relative timestamps in seconds
+    data     : [n_samples, n_eeg]     — uV, EEG channels only
+    channels : list[str]              — EEG channel names (no accelerometer)
+    accel    : [n_samples, 3] | None  — accelerometer X/Y/Z data in mg
     """
     df = pd.read_csv(eeg_path)
 
-    # Première colonne = temps relatif (secondes)
+    # First column = relative time (seconds)
     time_col = df.columns[0]
     times = df[time_col].values.astype(np.float64)
 
-    # Séparer EEG / accéléromètre / autres
+    # Split EEG / accelerometer / other
     accel_cols = [c for c in df.columns if c.startswith('ACC')]
     NON_EEG    = ('Packet', 'TRIGGER', 'ExG', 'A2')
     eeg_cols   = [
@@ -126,7 +126,7 @@ def load_eeg_cgx(eeg_path: str) -> Tuple[np.ndarray, np.ndarray, List[str], Opti
     accel = df[accel_cols].values.astype(np.float32) if accel_cols else None
 
     logger.info(
-        "EEG CGX chargé : %d échantillons | %d canaux EEG | %d canaux accel | durée %.1f s",
+        "CGX EEG loaded: %d samples | %d EEG channels | %d accel channels | duration %.1f s",
         len(times), len(eeg_cols),
         len(accel_cols) if accel_cols else 0,
         times[-1] - times[0]
@@ -136,29 +136,29 @@ def load_eeg_cgx(eeg_path: str) -> Tuple[np.ndarray, np.ndarray, List[str], Opti
 
 
 # ---------------------------------------------------------------------------
-# 2. Ancrage temporel depuis le nom de fichier EEG
+# 2. Temporal anchoring from the EEG file name
 # ---------------------------------------------------------------------------
 
 def parse_eeg_start_unix_ms(eeg_path: str) -> float:
     """
-    Extrait le timestamp Unix (ms) du début de l'enregistrement EEG
-    depuis le nom de fichier CGX.
+    Extracts the Unix timestamp (ms) of the EEG recording start from the
+    CGX file name.
 
-    Format confirmé sur données réelles :
+    Format confirmed on real data:
         UB0136_EEG_CGX_2024_01_19T16.30.01.csv
-        → date = 2024-01-19T16:30:01 (GMT+1, Espagne)
+        -> date = 2024-01-19T16:30:01 (GMT+1, Spain)
 
-    Retourne
-    --------
-    float — timestamp Unix en millisecondes
+    Returns
+    -------
+    float — Unix timestamp in milliseconds
     """
     basename = os.path.basename(eeg_path).replace(".csv", "")
 
-    # Extraire la partie après '_EEG_CGX_'
+    # Extract the part after '_EEG_CGX_'
     try:
         date_str = basename.split("_EEG_CGX_")[-1]
-        # Convertir format fichier → ISO 8601
-        # '2024_01_19T16.30.01' → '2024-01-19T16:30:01'
+        # Convert file format -> ISO 8601
+        # '2024_01_19T16.30.01' -> '2024-01-19T16:30:01'
         parts = date_str.split("T")
         date_part = parts[0].replace("_", "-")
         time_part = parts[1].replace(".", ":")
@@ -168,19 +168,19 @@ def parse_eeg_start_unix_ms(eeg_path: str) -> float:
         dt = dt.replace(tzinfo=TZ_SPAIN)
         unix_ms = dt.timestamp() * 1000.0
 
-        logger.info("Début EEG extrait du nom de fichier : %s → %.0f ms Unix",
+        logger.info("EEG start extracted from file name: %s -> %.0f ms Unix",
                     iso_str, unix_ms)
         return unix_ms
 
     except Exception as e:
         raise ValueError(
-            f"Impossible de parser la date depuis le nom de fichier '{eeg_path}'. "
-            f"Format attendu : *_EEG_CGX_YYYY_MM_DDTHH.MM.SS.csv\nErreur : {e}"
+            f"Could not parse the date from file name '{eeg_path}'. "
+            f"Expected format: *_EEG_CGX_YYYY_MM_DDTHH.MM.SS.csv\nError: {e}"
         )
 
 
 # ---------------------------------------------------------------------------
-# 3. Calcul et validation de l'offset session
+# 3. Session offset computation and validation
 # ---------------------------------------------------------------------------
 
 def compute_session_offset(
@@ -190,28 +190,28 @@ def compute_session_offset(
     sfreq: float = CGX_SFREQ
 ) -> Tuple[float, float]:
     """
-    Calcule et valide l'offset temporel de la session.
+    Computes and validates the session's temporal offset.
 
-    Stratégie :
+    Strategy:
         offset_ms = eeg_start_unix_ms
-        (le timestamp CGX est relatif depuis 0 → ajouter le temps Unix
-        du début d'enregistrement donne l'heure absolue)
+        (the CGX timestamp is relative from 0 -> adding the Unix time of
+        the recording start gives the absolute time)
 
-    Validation :
-        Pour chaque événement TAGS (timestamp_ms absolu), on recalcule
-        l'index EEG correspondant et on vérifie la cohérence.
-        Std attendue < 20 ms si l'ancrage est correct.
+    Validation:
+        For each TAGS event (absolute timestamp_ms), the corresponding
+        EEG index is recomputed and checked for consistency.
+        Expected std < 20 ms if the anchoring is correct.
 
-    Paramètres
+    Parameters
     ----------
-    tags_df           : sortie de load_tags()
-    eeg_times         : timestamps relatifs CGX (secondes)
-    eeg_start_unix_ms : timestamp Unix (ms) du début d'enregistrement EEG
+    tags_df           : output of load_tags()
+    eeg_times         : relative CGX timestamps (seconds)
+    eeg_start_unix_ms : Unix timestamp (ms) of the EEG recording start
 
-    Retourne
-    --------
-    offset_ms  : float — offset à appliquer (= eeg_start_unix_ms)
-    offset_std : float — écart-type de validation en ms
+    Returns
+    -------
+    offset_ms  : float — offset to apply (= eeg_start_unix_ms)
+    offset_std : float — validation standard deviation in ms
     """
     offset_ms = eeg_start_unix_ms
     residuals = []
@@ -220,7 +220,7 @@ def compute_session_offset(
         tag_unix_ms    = row['timestamp_ms']
         eeg_relative_s = (tag_unix_ms - offset_ms) / 1000.0
 
-        # Vérifier que l'événement tombe dans la fenêtre EEG
+        # Check that the event falls within the EEG window
         if eeg_relative_s < eeg_times[0] or eeg_relative_s > eeg_times[-1]:
             continue
 
@@ -230,7 +230,7 @@ def compute_session_offset(
         residuals.append(abs(reconstructed_ms - tag_unix_ms))
 
     if not residuals:
-        logger.warning("Aucun événement TAGS dans la fenêtre EEG — offset non validé.")
+        logger.warning("No TAGS event within the EEG window — offset not validated.")
         return offset_ms, 9999.0
 
     offset_std = float(np.std(residuals))
@@ -238,13 +238,13 @@ def compute_session_offset(
 
     if offset_std > 20.0:
         logger.warning(
-            "Std de validation élevée (%.1f ms, mean=%.1f ms) — "
-            "vérifier le nom de fichier EEG ou le fuseau horaire.",
+            "High validation std (%.1f ms, mean=%.1f ms) — "
+            "check the EEG file name or the timezone.",
             offset_std, mean_res
         )
     else:
         logger.info(
-            "Offset validé : %.0f ms | résidu mean=%.2f ms, std=%.2f ms | n=%d événements",
+            "Offset validated: %.0f ms | residual mean=%.2f ms, std=%.2f ms | n=%d events",
             offset_ms, mean_res, offset_std, len(residuals)
         )
 
@@ -252,11 +252,11 @@ def compute_session_offset(
 
 
 # ---------------------------------------------------------------------------
-# 4. Conversion d'indices
+# 4. Index conversion
 # ---------------------------------------------------------------------------
 
 def eeg_idx_to_unix_ms(eeg_times: np.ndarray, offset_ms: float) -> np.ndarray:
-    """Timestamps EEG relatifs (s) → temps Unix absolu (ms)."""
+    """Relative EEG timestamps (s) -> absolute Unix time (ms)."""
     return eeg_times * 1000.0 + offset_ms
 
 
@@ -266,8 +266,8 @@ def unix_ms_to_eeg_idx(
     offset_ms: float
 ) -> np.ndarray:
     """
-    Timestamps Unix (ms) → indices d'échantillons EEG.
-    Clippé aux bornes [0, n_samples-1].
+    Unix timestamps (ms) -> EEG sample indices.
+    Clipped to [0, n_samples-1].
     """
     eeg_relative_s = (unix_timestamps_ms - offset_ms) / 1000.0
     indices = np.searchsorted(eeg_times, eeg_relative_s)
@@ -275,7 +275,7 @@ def unix_ms_to_eeg_idx(
 
 
 # ---------------------------------------------------------------------------
-# 5. Validation cross-check niveau Slackline
+# 5. Slackline level cross-check validation
 # ---------------------------------------------------------------------------
 
 def validate_level_assignment(
@@ -284,15 +284,19 @@ def validate_level_assignment(
     candidate_levels: List[str] = ['Level1', 'Level6', 'Level11']
 ) -> Dict[str, dict]:
     """
-    Identifie le niveau Slackline en comparant les generalTime des événements
-    TAGS aux flag_spawn_time de chaque niveau.
+    Identifies the Slackline level by comparing TAGS events' generalTime
+    to each level's flag_spawn_time.
 
-    Le bon niveau = résidu moyen minimal entre generalTime et spawn_time le
-    plus proche. Validé empiriquement : bon niveau ~0.94 s de résidu moyen,
-    mauvais niveaux 2-5x plus.
+    The correct level = the one with the minimal mean residual between
+    generalTime and the closest spawn_time. Empirically validated: the
+    correct level has ~0.94 s mean residual, wrong levels 2-5x higher.
 
-    Retourne
-    --------
+    NOTE: this automatic matching is not 100% reliable — it has previously
+    picked the wrong level for a real subject (see context-transfer docs).
+    Always confirm against external metadata when possible.
+
+    Returns
+    -------
     dict { level_name : { 'mean_residual_s', 'std_residual_s' }, '_best': str }
     """
     levels_map = {
@@ -320,18 +324,18 @@ def validate_level_assignment(
             'mean_residual_s': mean_res,
             'std_residual_s':  std_res,
         }
-        logger.info("%s : résidu moyen=%.3f s (std=%.3f s)",
+        logger.info("%s: mean residual=%.3f s (std=%.3f s)",
                     level_name, mean_res, std_res)
 
     best = min(results, key=lambda k: results[k]['mean_residual_s'])
-    logger.info("Niveau assigné : %s", best)
+    logger.info("Assigned level: %s", best)
     results['_best'] = best
 
     return results
 
 
 # ---------------------------------------------------------------------------
-# 6. Point d'entrée principal
+# 6. Main entry point
 # ---------------------------------------------------------------------------
 
 def sync_session(
@@ -341,35 +345,36 @@ def sync_session(
     validate:        bool = True
 ) -> Dict:
     """
-    Charge EEG + TAGS, calcule l'offset temporel, valide le niveau Slackline.
+    Loads EEG + TAGS, computes the temporal offset, validates the
+    Slackline level.
 
-    Retourne
-    --------
+    Returns
+    -------
     {
-        'eeg_times'   : np.ndarray [n_samples]          — timestamps relatifs (s)
-        'eeg_data'    : np.ndarray [n_samples, n_eeg]   — µV
-        'eeg_channels': list[str]                        — noms canaux EEG
-        'accel_data'  : np.ndarray [n_samples, 3] | None — accéléromètre (mg)
+        'eeg_times'   : np.ndarray [n_samples]          — relative timestamps (s)
+        'eeg_data'    : np.ndarray [n_samples, n_eeg]   — uV
+        'eeg_channels': list[str]                        — EEG channel names
+        'accel_data'  : np.ndarray [n_samples, 3] | None — accelerometer (mg)
         'tags_df'     : pd.DataFrame
-        'offset_ms'   : float   — offset Unix à ajouter aux timestamps EEG
-        'offset_std'  : float   — std de validation (ms), doit être < 20
-        'level'       : str | None — niveau Slackline détecté automatiquement
-        'valid'       : bool    — True si offset_std < 20 ms
+        'offset_ms'   : float   — Unix offset to add to EEG timestamps
+        'offset_std'  : float   — validation std (ms), should be < 20
+        'level'       : str | None — automatically detected Slackline level
+        'valid'       : bool    — True if offset_std < 20 ms
     }
     """
-    # Chargement
+    # Loading
     eeg_times, eeg_data, channels, accel = load_eeg_cgx(eeg_path)
     tags_df = load_tags(tags_path)
 
-    # Ancrage temporel depuis le nom de fichier
+    # Temporal anchoring from the file name
     eeg_start_unix_ms = parse_eeg_start_unix_ms(eeg_path)
 
-    # Calcul + validation de l'offset
+    # Offset computation + validation
     offset_ms, offset_std = compute_session_offset(
         tags_df, eeg_times, eeg_start_unix_ms
     )
 
-    # Identification du niveau Slackline
+    # Slackline level identification
     level = None
     if validate:
         with open(flags_info_path) as f:

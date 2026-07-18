@@ -1,17 +1,17 @@
 """
 data/epoching.py
 ================
-Découpe les enregistrements EEG CGX en epochs verrouillés sur les événements
-Slackline, après synchronisation via sync.py.
+Cuts CGX EEG recordings into epochs locked on Slackline events, after
+synchronization via sync.py.
 
-Conventions :
-  - Un epoch = fenêtre [tmin, tmax] secondes autour de l'apparition d'un flag.
-  - Seuls les événements où reacted=True ET correct=True sont inclus par défaut.
-  - flagType=-1 est exclu (code non documenté, voir sync.py).
-  - La normalisation est intra-sujet/intra-session (z-score par canal sur la session)
-    car il n'y a PAS de resting-state dans BALLADEER.
+Conventions:
+  - An epoch = a [tmin, tmax] second window around a flag's appearance.
+  - Only events where reacted=True AND correct=True are included by default.
+  - flagType=-1 is excluded (undocumented code, see sync.py).
+  - Normalization is intra-subject/intra-session (per-channel z-score over
+    the session) because BALLADEER has NO resting-state recording.
 
-Auteur : GRN-BALLADEER project
+Author: GRN-BALLADEER project
 """
 
 import numpy as np
@@ -20,24 +20,24 @@ import logging
 from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass, field
 
-from sync import unix_ms_to_eeg_idx, CGX_SFREQ
+from grn_balladeer.data.sync import unix_ms_to_eeg_idx, CGX_SFREQ
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# 1. Structure de données : un epoch annoté
+# 1. Data structure: one annotated epoch
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Epoch:
-    """Un segment EEG avec ses métadonnées."""
+    """An EEG segment with its metadata."""
     data:        np.ndarray          # shape [n_samples_epoch, n_channels]
-    label:       int                 # 0 = contrôle, 1 = TDAH
+    label:       int                 # 0 = control, 1 = ADHD
     subject_id:  str
     session_id:  str
     flag_type:   int                 # 0/1/2/3
-    flag_time_s: float               # generalTime (s depuis début jeu)
+    flag_time_s: float               # generalTime (s since game start)
     reacted:     bool
     correct:     bool
     focus:       str                 # 'Target' | 'non_focusable'
@@ -45,7 +45,7 @@ class Epoch:
 
 
 # ---------------------------------------------------------------------------
-# 2. Prétraitement par canal
+# 2. Per-channel preprocessing
 # ---------------------------------------------------------------------------
 
 def bandpass_filter_np(
@@ -55,11 +55,11 @@ def bandpass_filter_np(
     h_freq: float
 ) -> np.ndarray:
     """
-    Filtre passe-bande FIR via numpy/scipy. Utilisé avant calcul de PLV.
-    Pour un prétraitement MNE complet, préférez load_eeg_cgx → mne.Raw.
+    FIR bandpass filter via numpy/scipy. Used before PLV computation.
+    For full MNE preprocessing, prefer load_eeg_cgx -> mne.Raw instead.
     """
     from scipy.signal import firwin, filtfilt
-    n_taps = int(sfreq) + 1  # durée filtre = 1 seconde
+    n_taps = int(sfreq) + 1  # filter duration = 1 second
     n_taps = n_taps if n_taps % 2 == 1 else n_taps + 1
     coeffs = firwin(n_taps, [l_freq, h_freq],
                     pass_zero=False, fs=sfreq)
@@ -71,7 +71,7 @@ def notch_filter_np(
     sfreq: float,
     freq: float = 50.0
 ) -> np.ndarray:
-    """Coupe-bande à freq Hz (bruit secteur, défaut 50 Hz pour EU/Afrique/Espagne)."""
+    """Notch filter at freq Hz (mains noise, default 50 Hz for EU/Africa/Spain)."""
     from scipy.signal import iirnotch, filtfilt
     b, a = iirnotch(freq, Q=30.0, fs=sfreq)
     return filtfilt(b, a, data, axis=0)
@@ -79,13 +79,13 @@ def notch_filter_np(
 
 def zscore_normalize_session(data: np.ndarray) -> np.ndarray:
     """
-    Normalisation z-score PAR CANAL sur l'ensemble de la session.
-    Obligatoire car pas de resting-state dans BALLADEER pour normaliser
-    inter-session. Appliqué AVANT le découpage en epochs.
+    PER-CHANNEL z-score normalization over the whole session.
+    Mandatory since there is no resting-state in BALLADEER to normalize
+    across sessions. Applied BEFORE cutting into epochs.
     """
     mean = data.mean(axis=0, keepdims=True)
     std = data.std(axis=0, keepdims=True)
-    std[std == 0] = 1.0  # éviter division par zéro sur canaux plats
+    std[std == 0] = 1.0  # avoid division by zero on flat channels
     return (data - mean) / std
 
 
@@ -97,21 +97,21 @@ def detect_motion_artifacts(
     accel_threshold_mg: float = 200.0
 ) -> np.ndarray:
     """
-    Masque booléen : True = epoch contaminé par du mouvement.
-    Utilise les colonnes accéléromètre CGX (disponibles dans le fichier).
-    Sert au test de robustesse réel en Phase 4 (stratification haute/basse
-    amplitude de mouvement).
+    Boolean mask: True = epoch contaminated by motion.
+    Uses the CGX accelerometer columns (available in the file).
+    Used for the real robustness test in Phase 4 (high/low motion
+    amplitude stratification).
 
-    Paramètres
+    Parameters
     ----------
-    accel_data         : [n_samples, 3] — axes X,Y,Z en mg. None = désactivé.
-    epoch_indices      : indices de début des epochs dans le signal EEG.
-    accel_threshold_mg : seuil d'amplitude max acceptable.
+    accel_data         : [n_samples, 3] — X,Y,Z axes in mg. None = disabled.
+    epoch_indices      : start indices of the epochs in the EEG signal.
+    accel_threshold_mg : maximum acceptable amplitude threshold.
     """
     if accel_data is None:
         return np.zeros(len(epoch_indices), dtype=bool)
 
-    accel_norm = np.linalg.norm(accel_data, axis=1)  # magnitude globale
+    accel_norm = np.linalg.norm(accel_data, axis=1)  # overall magnitude
     masks = []
     for idx in epoch_indices:
         end = min(idx + n_samples_epoch, len(accel_norm))
@@ -121,7 +121,7 @@ def detect_motion_artifacts(
 
 
 # ---------------------------------------------------------------------------
-# 3. Découpage principal
+# 3. Main cutting logic
 # ---------------------------------------------------------------------------
 
 def cut_epochs(
@@ -140,19 +140,19 @@ def cut_epochs(
     accel_data:    Optional[np.ndarray] = None
 ) -> Tuple[List[Epoch], dict]:
     """
-    Découpe le signal EEG en epochs verrouillés sur les événements TAGS.
+    Cuts the EEG signal into epochs locked on TAGS events.
 
-    Paramètres
+    Parameters
     ----------
-    tmin / tmax          : fenêtre en secondes autour du flag (défaut : -0.5s à +2.0s).
-    include_only_correct : si True, exclut les essais incorrect ET les non-réponses.
-    exclude_flag_types   : liste de flagTypes à exclure (ex. [-1] pour le code inconnu).
-    accel_data           : données accéléromètre [n_samples, 3] pour détecter artefacts.
+    tmin / tmax           : window in seconds around the flag (default: -0.5s to +2.0s).
+    include_only_correct : if True, excludes incorrect trials AND non-responses.
+    exclude_flag_types   : list of flagTypes to exclude (e.g. [-1] for the unknown code).
+    accel_data           : accelerometer data [n_samples, 3] to detect artifacts.
 
-    Retourne
-    --------
-    epochs : liste d'objets Epoch
-    stats  : dict de statistiques de découpage (pour les logs/rapport)
+    Returns
+    -------
+    epochs : list of Epoch objects
+    stats  : dict of cutting statistics (for logs/reporting)
     """
     if exclude_flag_types is None:
         exclude_flag_types = [-1]
@@ -171,31 +171,31 @@ def cut_epochs(
         'kept':            0,
     }
 
-    # Filtrer les événements
+    # Filter events
     working = tags_df.copy()
 
-    # Exclure flagTypes non souhaités
+    # Exclude unwanted flagTypes
     mask_flag = working['flagType'].isin(exclude_flag_types)
     stats['excluded_flag'] = int(mask_flag.sum())
     working = working[~mask_flag]
 
-    # Exclure les essais incorrects si demandé
+    # Exclude incorrect trials if requested
     if include_only_correct:
         mask_bad = ~(working['reacted'] & working['correct'])
         stats['excluded_correct'] = int(mask_bad.sum())
         working = working[~mask_bad]
 
-    # Convertir les timestamps TAGS en indices EEG
+    # Convert TAGS timestamps to EEG indices
     event_unix_ms = working['timestamp_ms'].values
-    # On utilise generalTime (ancre jeu) plutôt que timestamp réaction
-    # car generalTime marque l'APPARITION du flag, pas la réponse
-    # → on recalcule l'index depuis le temps EEG correspondant à generalTime
+    # We use generalTime (game anchor) rather than reaction timestamp
+    # because generalTime marks the flag's APPEARANCE, not the response
+    # -> recompute the index from the EEG time corresponding to generalTime
     general_times_s = working['generalTime'].values
-    # Convertir generalTime (relatif session) → timestamp Unix ms
+    # Convert generalTime (session-relative) -> Unix timestamp ms
     general_times_unix_ms = general_times_s * 1000.0 + offset_ms
     event_indices = unix_ms_to_eeg_idx(general_times_unix_ms, eeg_times, offset_ms)
 
-    # Détecter les artefacts de mouvement
+    # Detect motion artifacts
     motion_mask = detect_motion_artifacts(
         eeg_data, accel_data, event_indices, n_epoch
     )
@@ -204,12 +204,12 @@ def cut_epochs(
         start = idx - n_before
         end   = idx + n_after
 
-        # Hors bornes du signal
+        # Outside the signal boundaries
         if start < 0 or end > len(eeg_data):
             stats['excluded_boundary'] += 1
             continue
 
-        # Artefact de mouvement
+        # Motion artifact
         if motion_mask[k]:
             stats['excluded_motion'] += 1
             continue
@@ -233,8 +233,8 @@ def cut_epochs(
         stats['kept'] += 1
 
     logger.info(
-        "Sujet %s session %s : %d/%d epochs gardés "
-        "(excl. flag=%d, correct=%d, bornes=%d, mouvement=%d)",
+        "Subject %s session %s: %d/%d epochs kept "
+        "(excl. flag=%d, correct=%d, boundary=%d, motion=%d)",
         subject_id, session_id,
         stats['kept'], stats['total_events'],
         stats['excluded_flag'], stats['excluded_correct'],
@@ -245,7 +245,7 @@ def cut_epochs(
 
 
 # ---------------------------------------------------------------------------
-# 4. Prétraitement complet d'une session
+# 4. Full preprocessing of a session
 # ---------------------------------------------------------------------------
 
 def preprocess_and_epoch_session(
@@ -258,33 +258,33 @@ def preprocess_and_epoch_session(
     apply_normalize: bool = True
 ) -> Tuple[List[Epoch], dict]:
     """
-    Enchaîne notch + normalisation z-score + découpage en epochs sur une
-    session déjà synchronisée (sortie de sync.sync_session).
+    Chains notch + z-score normalization + epoch cutting on an already
+    synchronized session (output of sync.sync_session).
 
-    Le bandpass par bande est fait en AVAL dans le module connectivity/,
-    qui a besoin du signal large-bande pour calculer le PLV par bande.
-    Ici on applique seulement un filtre large [1–45 Hz] pour éliminer
-    les artéfacts basse fréquence et l'aliasing.
+    The per-band bandpass is done DOWNSTREAM in the connectivity/ module,
+    which needs the wide-band signal to compute per-band PLV. Here we only
+    apply a wide [1-45 Hz] filter to remove low-frequency artifacts and
+    aliasing.
     """
     eeg_times = session['eeg_times']
     eeg_data  = session['eeg_data'].copy()   # [n_samples, n_channels]
     tags_df   = session['tags_df']
     offset_ms = session['offset_ms']
 
-    # Filtre coupe-bande secteur (50 Hz, Espagne)
+    # Mains notch filter (50 Hz, Spain)
     if apply_notch:
         eeg_data = notch_filter_np(eeg_data, sfreq=CGX_SFREQ, freq=50.0)
 
-    # Filtre large-bande [1–45 Hz]
+    # Wide-band filter [1-45 Hz]
     eeg_data = bandpass_filter_np(eeg_data, sfreq=CGX_SFREQ,
                                    l_freq=1.0, h_freq=45.0)
 
-    # Normalisation intra-session
+    # Intra-session normalization
     if apply_normalize:
         eeg_data = zscore_normalize_session(eeg_data)
 
-    # Extraction accéléromètre si disponible dans le fichier EEG original
-    # (champs 'Accel X', 'Accel Y', 'Accel Z' — cf. README)
+    # Extract accelerometer data if available in the original EEG file
+    # ('Accel X', 'Accel Y', 'Accel Z' fields — see README)
     accel_data = session.get('accel_data', None)
 
     epochs, stats = cut_epochs(
@@ -307,22 +307,22 @@ def preprocess_and_epoch_session(
 
 
 # ---------------------------------------------------------------------------
-# 5. Construction du dataset sujet-complet
+# 5. Building the full-subject dataset
 # ---------------------------------------------------------------------------
 
 def build_subject_epoch_array(
     epochs: List[Epoch]
 ) -> Tuple[np.ndarray, np.ndarray, List[dict]]:
     """
-    Convertit une liste d'Epoch en tableaux numpy prêts pour le GRN.
+    Converts a list of Epoch objects into numpy arrays ready for the GRN.
 
-    Retourne
-    --------
-    X     : [n_epochs, n_channels, n_samples] — format standard PyTorch conv
+    Returns
+    -------
+    X     : [n_epochs, n_channels, n_samples] — standard PyTorch conv format
     y     : [n_epochs] — labels (0/1)
-    meta  : liste de dicts avec subject_id, flag_type, reaction_time_s, focus
+    meta  : list of dicts with subject_id, flag_type, reaction_time_s, focus
     """
-    X = np.stack([e.data.T for e in epochs], axis=0)  # transposer → [ch, time]
+    X = np.stack([e.data.T for e in epochs], axis=0)  # transpose -> [ch, time]
     y = np.array([e.label for e in epochs], dtype=np.int64)
     meta = [
         {
