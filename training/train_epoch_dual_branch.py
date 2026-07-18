@@ -83,16 +83,18 @@ def train_epoch_dual_branch(
     z_joint_list = []
     l_harm_terms = []
     l_symb_terms = []
+    omega_per_sample = []
     last_omega = None
 
     for sample_idx in range(len(batch)):
         X_i, L_norm_i = batch[sample_idx]
         subject_id = subject_ids[sample_idx]
 
-        h_i = encoder(X_i, L_norm_i)
+        h_i = encoder(X_i, L_norm_i)  # SINGLE forward pass per sample (was computed twice before this fix)
         z_eeg_i = global_pool(split_real_imag(h_i), method=pool_method)
 
         omega_i = extract_resonance_frequency(h_i, resonance_head)
+        omega_per_sample.append(omega_i)
         last_omega = omega_i
         l_harm_terms.append(harmonic_loss(omega_i, all_pairs))
 
@@ -106,14 +108,10 @@ def train_epoch_dual_branch(
     logits = head(z_joint_batch)
     l_task = nn.functional.cross_entropy(logits, labels)
 
+    # l_symb needs softmax(logits), which needs the full batch's logits first - this
+    # second pass reuses omega_per_sample (no encoder call), not a fresh forward pass.
     probs = torch.softmax(logits, dim=-1)
-    for sample_idx in range(len(batch)):
-        # re-derive omega per sample for l_symb (l_harm's omega already collected above,
-        # recomputed here since it's cheap relative to the encoder forward pass and keeps
-        # this loop's structure symmetric with train_epoch.py's EEG-only version)
-        X_i, L_norm_i = batch[sample_idx]
-        h_i = encoder(X_i, L_norm_i)
-        omega_i = extract_resonance_frequency(h_i, resonance_head)
+    for sample_idx, omega_i in enumerate(omega_per_sample):
         omega_frontal_i = omega_i[frontal_pairs[:, 0]]
         omega_frontal_j = omega_i[frontal_pairs[:, 1]]
         mu_ij = compute_consonance_degree(omega_frontal_i, omega_frontal_j)
