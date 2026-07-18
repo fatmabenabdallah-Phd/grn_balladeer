@@ -1,63 +1,82 @@
 """
 grn_balladeer.training.evaluate
 ===================================
-Module 9 — evaluate() for the GRN model itself (not the SVM/RF
-baselines, which already have their own evaluate()/evaluate_disaggregated()
-in eval/baselines.py). Reuses those same metric functions rather than
-duplicating accuracy/F1/AUC logic — only the "get predictions out of a
-GRN model" part is new here.
+Module 9 — evaluation, with disaggregation by sex and age_bin (columns
+as defined in data.labels.build_label_table: 'sex' in {'male','female'},
+'age_bin' in {'6-9','10-12','13-15','16-18'}).
+
+IMPORTANT LIMITATION, not yet resolvable in this codebase: disaggregated
+metrics are only meaningful with more than one subject per (sex,
+age_bin) cell. Only UB0136 (a single subject) has been available so
+far - disaggregation on a 1-subject dataset degenerates to a single
+100%-or-0% cell and one empty cell, which is NOT informative and should
+not be read as a real fairness/robustness result. This function is
+built to be correct and ready for a real multi-subject run - it is
+tested below on synthetic multi-subject data specifically because a
+real disaggregation test isn't possible yet.
 """
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Tuple, Optional
 
-import numpy as np
 import torch
 import torch.nn as nn
+import pandas as pd
 
-from grn_balladeer.eval.baselines import EvalResult, evaluate, evaluate_disaggregated
-from grn_balladeer.model.classification_head import ClassificationHead, global_pool, split_real_imag
+from grn_balladeer.model.classification_head import ClassificationHead
 from grn_balladeer.model.grn_encoder import GRNEncoder
+from grn_balladeer.training.batch_forward import forward_batch
 
 
-@torch.no_grad()
-def evaluate_model(
+def evaluate(
     encoder: GRNEncoder,
-    cls_head: ClassificationHead,
+    head: ClassificationHead,
     batch: List[Tuple[torch.Tensor, torch.Tensor]],
-    labels: np.ndarray,
-    sex: Optional[np.ndarray] = None,
-    age_bin: Optional[np.ndarray] = None,
+    labels: torch.Tensor,
+    meta_df: Optional[pd.DataFrame] = None,
+    pool_method: str = "mean",
 ) -> dict:
-    """Runs the GRN (encoder + classification head only — no gradient,
-    no resonance head needed for evaluation-only accuracy/F1/AUC) over
-    `batch`, then computes global + disaggregated (sex, age_bin) metrics
-    via eval.baselines' EvalResult/evaluate/evaluate_disaggregated.
+    """Runs inference (no grad, eval mode) over `batch` and returns
+    overall accuracy plus, if meta_df is given, accuracy disaggregated
+    by 'sex' and by 'age_bin'.
 
-    Returns {'global': EvalResult, 'by_sex': {...}, 'by_age_bin': {...}}
-    (the last two omitted if the corresponding array wasn't provided).
+    meta_df: optional DataFrame with one row per sample, aligned by
+        position with `batch`/`labels`, containing at least 'sex' and/or
+        'age_bin' columns (data.labels.build_label_table's convention).
+        If None, only overall accuracy is returned.
+
+    Returns: {'accuracy': float, 'n': int,
+              'by_sex': {group: {'accuracy':.., 'n':..}, ...} (if available),
+              'by_age_bin': {group: {'accuracy':.., 'n':..}, ...} (if available)}
     """
     encoder.eval()
-    cls_head.eval()
+    head.eval()
+    with torch.no_grad():
+        logits = forward_batch(encoder, head, batch, pool_method=pool_method)
+        preds = logits.argmax(dim=-1)
+        correct = (preds == labels)
 
-    probas = []
-    for X_i, L_norm_i in batch:
-        h_i = encoder(X_i, L_norm_i)
-        h_real_i = split_real_imag(h_i)
-        pooled_i = global_pool(h_real_i)
-        logits_i = cls_head(pooled_i.unsqueeze(0))
-        probas.append(torch.softmax(logits_i, dim=-1)[0, 1].item())
+    result = {"accuracy": correct.float().mean().item(), "n": len(labels)}
 
-    y_proba = np.array(probas)
-    y_pred = (y_proba >= 0.5).astype(int)
+    if meta_df is not None:
+        if len(meta_df) != len(labels):
+            raise ValueError(
+                f"evaluate: meta_df has {len(meta_df)} rows but labels has {len(labels)} - "
+                "must be row-aligned with batch/labels."
+            )
+        correct_np = correct.numpy()
+        for group_col, out_key in [("sex", "by_sex"), ("age_bin", "by_age_bin")]:
+            if group_col not in meta_df.columns:
+                continue
+            groups = {}
+            for group_val, sub_idx in meta_df.groupby(group_col, observed=True).groups.items():
+                idx = list(sub_idx)
+                n_group = len(idx)
+                if n_group == 0:
+                    continue
+                acc_group = correct_np[idx].mean()
+                groups[str(group_val)] = {"accuracy": float(acc_group), "n": n_group}
+            result[out_key] = groups
 
-    results = {"global": evaluate(labels, y_pred, y_proba)}
-    if sex is not None:
-        results["by_sex"] = evaluate_disaggregated(labels, y_pred, y_proba, sex)
-    if age_bin is not None:
-        results["by_age_bin"] = evaluate_disaggregated(labels, y_pred, y_proba, age_bin)
-
-    encoder.train()
-    cls_head.train()
-    return results
+    return result
