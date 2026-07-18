@@ -15,7 +15,10 @@ import numpy as np
 import pandas as pd
 from scipy.signal import welch
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.metrics import (
+    accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score,
+    precision_recall_fscore_support, confusion_matrix,
+)
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
@@ -131,15 +134,44 @@ class EvalResult:
     f1: float
     auc: float
     n: int
+    # EXTENDED this session - the original 3 metrics alone can hide a model
+    # that mostly predicts the majority class, given the real ~64%/36%
+    # ADHD/Control imbalance in the 138-subject cohort. balanced_accuracy
+    # averages per-class recall (not fooled by imbalance); f1_class0/1 and
+    # sensitivity/specificity give the clinically-relevant asymmetry
+    # (missing a real ADHD case is not the same cost as a false positive).
+    balanced_accuracy: float
+    f1_class0: float
+    f1_class1: float
+    sensitivity: float  # recall on class 1 (ADHD, per data.labels' label=1 convention)
+    specificity: float  # recall on class 0 (Control)
 
 
 def evaluate(y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndarray) -> EvalResult:
-    """Accuracy, F1, AUC. Call globally, then per sub-group."""
+    """Accuracy, F1, AUC, balanced accuracy, per-class F1, sensitivity/
+    specificity. Call globally, then per sub-group via
+    evaluate_disaggregated(). Assumes binary labels {0, 1} with 1=ADHD,
+    matching data.labels.build_label_table's convention - sensitivity/
+    specificity naming would be wrong for a different label convention."""
+    precision_per_class, recall_per_class, f1_per_class, _ = precision_recall_fscore_support(
+        y_true, y_pred, labels=[0, 1], zero_division=0
+    )
+
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+    tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (float("nan"),) * 4
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
+
     return EvalResult(
         accuracy=accuracy_score(y_true, y_pred),
         f1=f1_score(y_true, y_pred),
         auc=roc_auc_score(y_true, y_proba) if len(set(y_true)) > 1 else float("nan"),
         n=len(y_true),
+        balanced_accuracy=balanced_accuracy_score(y_true, y_pred),
+        f1_class0=float(f1_per_class[0]),
+        f1_class1=float(f1_per_class[1]),
+        sensitivity=float(sensitivity),
+        specificity=float(specificity),
     )
 
 
