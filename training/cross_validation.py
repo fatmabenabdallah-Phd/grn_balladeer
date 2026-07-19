@@ -44,17 +44,30 @@ def _flatten_subjects(
     subject_ids: List[str],
     dataset_by_subject: Dict[str, List[Tuple[torch.Tensor, torch.Tensor]]],
     labels_by_subject: Dict[str, int],
+    device: torch.device,
 ) -> Tuple[List[Tuple[torch.Tensor, torch.Tensor]], torch.Tensor, List[str]]:
     """Expands a list of subject ids into a flat (epoch-level) batch,
     labels tensor, and parallel subject-id-per-epoch list - the format
-    train_epoch/train_epoch_dual_branch actually consume."""
+    train_epoch/train_epoch_dual_branch actually consume.
+
+    Moves each (X_i, L_norm_i) pair to `device` here, once, rather than
+    inside the per-epoch training loop -- downstream code (model/
+    losses) already threads `device=some_tensor.device` through instead
+    of hardcoding 'cpu', so getting the INPUT tensors onto the right
+    device once is enough to get the whole forward/backward pass
+    running there. Confirmed by grep across model/losses/training: no
+    module ever called .cuda() or .to(device) anywhere before this fix
+    -- meaning every previous run (including the first full 114-subject
+    CV run this session) silently ran on CPU even with a GPU attached
+    (0.0/15.0 GB GPU RAM used during that run is the direct evidence).
+    """
     batch, labels, ids = [], [], []
     for sid in subject_ids:
         for X_i, L_norm_i in dataset_by_subject[sid]:
-            batch.append((X_i, L_norm_i))
+            batch.append((X_i.to(device), L_norm_i.to(device)))
             labels.append(labels_by_subject[sid])
             ids.append(sid)
-    return batch, torch.tensor(labels, dtype=torch.long), ids
+    return batch, torch.tensor(labels, dtype=torch.long, device=device), ids
 
 
 def train_fold(
@@ -71,6 +84,7 @@ def train_fold(
     lambda2: float = 1.0,
     lambda3: float = 1.0,
     embedding_dim: int = 8,
+    device: Optional[torch.device] = None,
 ) -> dict:
     """Trains ONE fold from scratch (fresh model, fresh optimizer -
     folds must not share weights, that would leak information across
@@ -82,23 +96,31 @@ def train_fold(
     same function handles both modes, matching Week 6's "EEG-only vs
     dual-branch" comparison requirement without duplicating the loop.
 
+    device: defaults to CUDA if available, else CPU. Every model
+    (encoder, resonance_head, head, and aux_encoder/fusion in
+    dual-branch mode) is moved there, and _flatten_subjects moves the
+    input tensors there too -- both sides must match or torch raises.
+
     Returns: {'eval_result': EvalResult, 'history': [...], 'val_subject_ids':
     [...], 'final_omega_collapse': OmegaCollapseReport}
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     dual_branch = aux_vectors_by_subject is not None
 
-    train_batch, train_labels, train_ids = _flatten_subjects(train_subject_ids, dataset_by_subject, labels_by_subject)
-    val_batch, val_labels, val_ids = _flatten_subjects(val_subject_ids, dataset_by_subject, labels_by_subject)
+    train_batch, train_labels, train_ids = _flatten_subjects(train_subject_ids, dataset_by_subject, labels_by_subject, device)
+    val_batch, val_labels, val_ids = _flatten_subjects(val_subject_ids, dataset_by_subject, labels_by_subject, device)
 
     in_channels = train_batch[0][0].shape[1]
     torch.manual_seed(seed)
-    encoder = GRNEncoder(in_channels=in_channels, hidden_channels=[16, embedding_dim], K=3)
-    resonance_head = build_resonance_head(embedding_dim=embedding_dim)
-    head = ClassificationHead(in_features=2 * embedding_dim, n_classes=2)
+    encoder = GRNEncoder(in_channels=in_channels, hidden_channels=[16, embedding_dim], K=3).to(device)
+    resonance_head = build_resonance_head(embedding_dim=embedding_dim).to(device)
+    head = ClassificationHead(in_features=2 * embedding_dim, n_classes=2).to(device)
 
     if dual_branch:
-        aux_encoder = AuxBranchEncoder()
-        fusion = CrossAttentionFusion()
+        aux_encoder = AuxBranchEncoder().to(device)
+        fusion = CrossAttentionFusion().to(device)
         params = (list(encoder.parameters()) + list(resonance_head.parameters()) +
                   list(aux_encoder.parameters()) + list(fusion.parameters()) + list(head.parameters()))
     else:
@@ -134,16 +156,16 @@ def train_fold(
             z_eeg_i = global_pool(split_real_imag(h_i))
             if dual_branch:
                 aux_vec = aux_vectors_by_subject[val_ids[i]]
-                z_aux_i = aux_encoder(torch.tensor(aux_vec, dtype=torch.float32).unsqueeze(0))
+                z_aux_i = aux_encoder(torch.tensor(aux_vec, dtype=torch.float32, device=device).unsqueeze(0))
                 z_i, _, _ = fusion(z_eeg_i.unsqueeze(0), z_aux_i)
             else:
                 z_i = z_eeg_i.unsqueeze(0)
             logits_list.append(head(z_i))
         val_logits = torch.cat(logits_list, dim=0)
-        val_probs = torch.softmax(val_logits, dim=-1)[:, 1].numpy()  # P(class=1=ADHD)
-        val_preds = val_logits.argmax(dim=-1).numpy()
+        val_probs = torch.softmax(val_logits, dim=-1)[:, 1].cpu().numpy()  # P(class=1=ADHD)
+        val_preds = val_logits.argmax(dim=-1).cpu().numpy()
 
-    result = evaluate(val_labels.numpy(), val_preds, val_probs)
+    result = evaluate(val_labels.cpu().numpy(), val_preds, val_probs)
     collapse = check_omega_collapse(history[-1]["last_omega"])
 
     return {
@@ -161,6 +183,7 @@ def run_cross_validation(
     k: int = 5,
     seed: int = 42,
     n_epochs: int = 30,
+    device: Optional[torch.device] = None,
     **train_fold_kwargs,
 ) -> pd.DataFrame:
     """Full k-fold CV: stratified_subject_kfold(label_df, k, seed) ->
@@ -170,6 +193,12 @@ def run_cross_validation(
     legitimately not cover every subject in label_df until the full
     Colab run).
 
+    device: defaults to CUDA if available, else CPU -- resolved and
+    PRINTED here explicitly (not left to silently default somewhere
+    downstream), because that silence is exactly what let the whole
+    project run on CPU-only for 6 weeks despite a GPU being attached.
+    Forwarded to train_fold via train_fold_kwargs.
+
     Returns a DataFrame, one row per fold (columns: fold, n_train,
     n_val, accuracy, balanced_accuracy, f1, f1_class0, f1_class1,
     sensitivity, specificity, auc, omega_collapsed), plus a final
@@ -177,6 +206,11 @@ def run_cross_validation(
     row - report BOTH, never just the mean, given how few folds are
     feasible with the current subject count.
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[run_cross_validation] device utilisé pour tous les folds : {device}")
+    train_fold_kwargs["device"] = device
+
     labels_by_subject = dict(zip(label_df["user_id"], label_df["label"]))
     available_subjects = set(dataset_by_subject.keys())
 

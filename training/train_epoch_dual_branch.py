@@ -99,7 +99,7 @@ def train_epoch_dual_branch(
         l_harm_terms.append(harmonic_loss(omega_i, all_pairs))
 
         aux_vec = aux_vectors_by_subject[subject_id]
-        z_aux_i = aux_encoder(torch.tensor(aux_vec, dtype=torch.float32).unsqueeze(0))
+        z_aux_i = aux_encoder(torch.tensor(aux_vec, dtype=torch.float32, device=X_i.device).unsqueeze(0))
 
         z_joint_i, _, _ = fusion(z_eeg_i.unsqueeze(0), z_aux_i)
         z_joint_list.append(z_joint_i.squeeze(0))
@@ -121,11 +121,11 @@ def train_epoch_dual_branch(
     l_harm = torch.stack(l_harm_terms).mean()
     l_symb = torch.stack(l_symb_terms).mean()
 
-    triplets = mine_batch_hard_triplets(z_joint_batch, labels.numpy(), subject_ids)
+    triplets = mine_batch_hard_triplets(z_joint_batch, labels.cpu().numpy(), subject_ids)
     if triplets:
         l_triplet = triplet_loss(z_joint_batch, triplets, margin=triplet_margin)
     else:
-        l_triplet = torch.tensor(0.0)  # no valid anti-leak triplet in this batch - see docstring
+        l_triplet = torch.tensor(0.0, device=z_joint_batch.device)  # no valid anti-leak triplet in this batch - see docstring
 
     loss = total_loss(l_task, l_harm, l_symb, l_triplet=l_triplet, lambda1=lambda1, lambda2=lambda2, lambda3=lambda3)
     loss.backward()
