@@ -128,6 +128,14 @@ def train_fold(
 
     optimizer = torch.optim.Adam(params, lr=lr)
 
+    # NEW this session: inverse-frequency class weights, computed from
+    # THIS FOLD's train labels only (not the global cohort ratio) --
+    # addresses the majority-class-collapse pattern found in the first
+    # full 114-subject run (specificity=0.0 on every fold). See
+    # train_epoch's updated docstring for the full diagnosis.
+    class_counts = torch.bincount(train_labels, minlength=2).float()
+    class_weights = (class_counts.sum() / (2.0 * class_counts)).to(device)
+
     history = []
     for _ in range(n_epochs):
         if dual_branch:
@@ -135,11 +143,14 @@ def train_fold(
                 encoder, resonance_head, aux_encoder, fusion, head,
                 train_batch, train_labels, train_ids, aux_vectors_by_subject, ch_names, optimizer,
                 lambda1=lambda1, lambda2=lambda2, lambda3=lambda3,
+                # TODO: train_epoch_dual_branch does not yet accept
+                # class_weights -- add if the dual-branch run shows the
+                # same majority-class collapse as the EEG-only run did.
             )
         else:
             stats = train_epoch(
                 encoder, head, resonance_head, train_batch, train_labels, ch_names, optimizer,
-                lambda1=lambda1, lambda2=lambda2,
+                lambda1=lambda1, lambda2=lambda2, class_weights=class_weights,
             )
         history.append(stats)
 

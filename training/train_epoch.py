@@ -42,12 +42,27 @@ def train_epoch(
     lambda1: float = 1.0,
     lambda2: float = 1.0,
     pool_method: str = "mean",
+    class_weights: "torch.Tensor | None" = None,
 ) -> dict:
     """Runs ONE training epoch (one full pass over `batch`, single
     gradient step per call - call this in an outer loop over epochs).
 
     batch: list of (X_i, L_norm_i), one per sample, as in forward_batch.
     labels: (n_samples,) long tensor, class index per sample.
+
+    class_weights: optional (n_classes,) tensor passed to cross_entropy's
+    `weight` argument. NEW this session -- the real dataset is class-
+    imbalanced (~64% ADHD / 36% Control across the full cohort, similar
+    ratio within most folds), and this training loop is full-batch
+    gradient descent (ONE optimizer.step() per call, n_epochs calls
+    total from train_fold) -- i.e. very few total gradient steps
+    (e.g. 30). That combination (imbalance + few steps + unweighted
+    cross-entropy) is a well-known recipe for the classifier collapsing
+    to always predict the majority class, which is exactly the pattern
+    observed in this project's first full-114-subject run (specificity
+    =0.0, sensitivity=1.0 on every one of 5 folds). Pass inverse-
+    frequency weights (see cross_validation.train_fold) to counteract
+    this directly, on top of considering more epochs/steps.
     ch_names: channel names for the graph nodes (needed to find frontal
         pairs for L_symb) - assumed IDENTICAL across all samples in the
         batch (same channel layout per epoch). If a future dataset mixes
@@ -87,7 +102,7 @@ def train_epoch(
         l_harm_terms.append(harmonic_loss(omega_i, all_pairs))
 
     logits = torch.cat(logits_list, dim=0)  # (n_samples, n_classes)
-    l_task = nn.functional.cross_entropy(logits, labels)
+    l_task = nn.functional.cross_entropy(logits, labels, weight=class_weights)
 
     # l_symb needs softmax(logits) as "confidence", which needs ALL logits computed
     # first - hence this second (cheap, no encoder call) pass over the already-
