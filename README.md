@@ -7,13 +7,18 @@ GRN pipeline for EEG-based ADHD classification (BALLADEER project).
 ```
 grn_balladeer/
 ├── data/           # Module 1 — labels, demographics mapping, stratified split
-│                   # + build_dataset.py (reusable subject recipe, flat imports)
-│                   # + epoching.py, sync.py (⚠ French docstrings, see Known issues)
+│                   # + build_dataset.py (reusable subject recipe, tested on
+│                   #   real UB0022 data, package-qualified imports)
+│                   # + epoching.py, sync.py (subject-level epoch cutting +
+│                   #   TAGS/EEG timestamp sync — overlaps with
+│                   #   preprocessing/epoching.py + event_alignment.py, not
+│                   #   yet reconciled, see Known issues)
 ├── preprocessing/  # Module 2b — MNE loading, filtering, ICA, event alignment,
 │                   #   epoching, quality/motion. Validated on real UB0004/UB0022/
 │                   #   UB0136/UB0023 files.
 ├── connectivity/   # Module 3 — PLV, magnetic Laplacian
-│                   # + plv.py (⚠ stale duplicate, French docstring, unused)
+│                   # + plv.py (⚠ stale duplicate of phase_connectivity.py,
+│                   #   unused, self-documented as a removal candidate)
 ├── model/          # Module 4-8 — CQT encoder, magnetic Laplacian conv, GRNEncoder
 │                   #   (omega bounded to [1, 45] Hz), classification head,
 │                   #   AuxBranchEncoder + CrossAttentionFusion (dual-branch, dim
@@ -22,9 +27,15 @@ grn_balladeer/
 │                   #   (CONSONANCE_RATIOS=[1,2,3,4], literature-grounded)
 ├── training/       # Module 8/9 — batch_forward, omega_diagnostics, train_epoch,
 │                   #   train_epoch_dual_branch, evaluate, leakage_probes,
-│                   #   behavioral_features, eda_features
-├── eval/           # Module 10-13 — baselines, ablations, XAI
+│                   #   behavioral_features, eda_features, cross_validation
+│                   #   (train_fold/run_cross_validation, Week 6),
+│                   #   run_first_training_proxy_task
+├── eval/           # Module 10 — baselines (SVM/RF), EvalResult extended with
+│                   #   balanced_accuracy/sensitivity/specificity
 ├── configs/        # one YAML file per dataset (BALLADEER, future dataset X)
+├── methodologie_evaluation_GRN.md  # Full evaluation protocol for the future
+│                   #   138-subject Colab run (CV k=5, nested CV for
+│                   #   hyperparameters, multi-seed, ablation order)
 └── requirements.txt
 ```
 
@@ -85,33 +96,52 @@ notebook, not inside the container.
       split — both are expected data-volume artifacts with only 4 real
       subjects (2/class), not bugs. See training/leakage_probes.py for the
       sex-leakage diagnostic (synthetic-tested only so far).
+      Optimized (single encoder forward pass in train_epoch/
+      train_epoch_dual_branch, ~2x speedup at scale) ahead of the full
+      138-subject Colab run.
+- [x] **Module 9 (Week 6)** (`train_fold` / `run_cross_validation`) —
+      single code path for EEG-only vs dual-branch CV on top of
+      `stratified_subject_kfold`; mechanically tested on the 4 real
+      subjects (k=2). Ready for the full 138-subject Colab run, not yet
+      run on it. See `methodologie_evaluation_GRN.md` for the full
+      protocol (k=5 CV, nested CV if hyperparameters are tuned, ≥3 seeds
+      per fold).
 - [x] **Module 10** (SVM/RF/theta-beta ratio baselines) — code ready, can
-      be run on real epoched data.
-- [ ] **Module 11-13** (ablations, XAI, full cross-validation loop) — not
-      started; blocked on having more than 4 real subjects (need ≥3/class
+      be run on real epoched data. `EvalResult` extended with
+      `balanced_accuracy`/`sensitivity`/`specificity` (plain accuracy hid
+      a degenerate always-predict-majority-class case — caught this
+      session).
+- [ ] **Module 11-13** (ablations, XAI) — not started; the ablation order
+      is planned in `methodologie_evaluation_GRN.md` (dual-branch vs
+      EEG-only, with/without L_harm, with/without L_symb, with/without
+      L_triplet) but none have been run. Meaningful ablation results are
+      still blocked on having more than 4 real subjects (need ≥3/class
       for a clean train/val split to coexist with useful triplet mining).
 
 ## Known issues / not yet cleaned up
 
-- **French-language docstrings found in `data/epoching.py`, `data/sync.py`,
-  and `connectivity/plv.py`** — violates the project's English-only
-  standing instruction. These came from a parallel work thread on this
-  repo and have not yet been translated or reconciled.
 - **Duplicate/overlapping implementations**, left in place pending
   reconciliation rather than silently deleted:
-  - `parse_tags_file` exists in both `preprocessing/event_alignment.py`
-    (snake_case columns) and `training/behavioral_features.py` (its own
-    copy, camelCase columns).
   - `connectivity/plv.py` duplicates `connectivity/phase_connectivity.py`
-    and is unused — candidate for deletion.
-  - `data/epoching.py` / `data/sync.py` overlap with
-    `preprocessing/epoching.py` / `preprocessing/event_alignment.py`.
-- **`data/build_dataset.py` uses flat imports** (`from preprocessing.X
-  import Y`) instead of the `grn_balladeer.preprocessing.X` convention
-  used everywhere else in the package.
+    and is unused — self-documented in its own docstring as a removal
+    candidate.
+  - `data/epoching.py` / `data/sync.py` (subject-level epoch cutting +
+    TAGS/EEG sync) overlap with `preprocessing/epoching.py` /
+    `preprocessing/event_alignment.py` — not yet reconciled into one
+    code path.
+  - (Resolved: the earlier duplicate `parse_tags_file` in
+    `training/behavioral_features.py` has been merged into the single
+    version in `preprocessing/event_alignment.py`; `data/build_dataset.py`
+    now uses package-qualified imports throughout.)
 - **Known confound**: in the current 4-subject slice, sex is perfectly
   correlated with class (2 female Control, 2 male ADHD) — no result on
   these 4 subjects can distinguish ADHD detection from sex detection.
+- **`training/leakage_probes.py::check_sex_leakage`** is tested only on
+  synthetic data so far — a real leakage test needs the full 138-subject
+  cohort (Drive), not just the 4-subject slice.
+- **Ablations (Module 11-13) not yet run** — the protocol and priority
+  order are written up in `methodologie_evaluation_GRN.md`, but no
+  ablation has actually been executed yet.
 - **Dataset files** (CSVs, JSON, EmbracePlus, `.pt` checkpoints) are
   intentionally not committed — see `.gitignore`. Checkpoints must be
   rebuilt from raw CSVs each session.

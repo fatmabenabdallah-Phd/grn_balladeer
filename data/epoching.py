@@ -71,7 +71,7 @@ def notch_filter_np(
     sfreq: float,
     freq: float = 50.0
 ) -> np.ndarray:
-    """Notch filter at freq Hz (mains noise, default 50 Hz for EU/Africa/Spain)."""
+    """Notch filter at freq Hz (mains noise, default 50 Hz — Tunisia is 50 Hz mains)."""
     from scipy.signal import iirnotch, filtfilt
     b, a = iirnotch(freq, Q=30.0, fs=sfreq)
     return filtfilt(b, a, data, axis=0)
@@ -271,7 +271,7 @@ def preprocess_and_epoch_session(
     tags_df   = session['tags_df']
     offset_ms = session['offset_ms']
 
-    # Mains notch filter (50 Hz, Spain)
+    # Mains notch filter (50 Hz — Tunisia)
     if apply_notch:
         eeg_data = notch_filter_np(eeg_data, sfreq=CGX_SFREQ, freq=50.0)
 
