@@ -21,14 +21,26 @@ def split_real_imag(h_complex: torch.Tensor) -> torch.Tensor:
 
 
 def global_pool(node_embeddings: torch.Tensor, method: str = "mean") -> torch.Tensor:
-    """Pools (n_nodes, d) real-valued node embeddings into a single
-    (d,) graph-level embedding. method in {'mean', 'sum', 'max'}."""
+    """Pools node-level embeddings into a graph-level embedding.
+
+    Accepts EITHER a single graph (N, d) -> returns (d,), pooling over
+    dim=0 (nodes) -- the original, still-default behavior -- OR a batch
+    (B, N, d) -> returns (B, d), pooling over dim=1 (nodes), added this
+    session alongside MagneticLaplacianConv's batch support. Auto-
+    detected via node_embeddings.dim(); pooling over the wrong axis for
+    the batched case would silently collapse the BATCH dimension
+    instead of nodes, so this distinction matters and is not just
+    cosmetic.
+
+    method in {'mean', 'sum', 'max'}.
+    """
+    node_dim = 1 if node_embeddings.dim() == 3 else 0
     if method == "mean":
-        return node_embeddings.mean(dim=0)
+        return node_embeddings.mean(dim=node_dim)
     elif method == "sum":
-        return node_embeddings.sum(dim=0)
+        return node_embeddings.sum(dim=node_dim)
     elif method == "max":
-        return node_embeddings.max(dim=0).values
+        return node_embeddings.max(dim=node_dim).values
     else:
         raise ValueError(f"global_pool: unknown method '{method}', expected 'mean'/'sum'/'max'")
 

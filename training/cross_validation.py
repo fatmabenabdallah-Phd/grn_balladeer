@@ -34,6 +34,7 @@ from grn_balladeer.model.classification_head import ClassificationHead, global_p
 from grn_balladeer.model.aux_branch_encoder import AuxBranchEncoder
 from grn_balladeer.model.cross_attention_fusion import CrossAttentionFusion
 from grn_balladeer.training.train_epoch import train_epoch
+from grn_balladeer.training.train_epoch_batched import train_epoch_batched
 from grn_balladeer.training.train_epoch_dual_branch import train_epoch_dual_branch
 from grn_balladeer.training.omega_diagnostics import check_omega_collapse
 from grn_balladeer.eval.baselines import evaluate, EvalResult
@@ -148,7 +149,14 @@ def train_fold(
                 # same majority-class collapse as the EEG-only run did.
             )
         else:
-            stats = train_epoch(
+            # Switched to the vectorized train_epoch_batched this session --
+            # verified numerically equivalent to train_epoch (logits, l_task,
+            # l_harm, l_symb all matched to float precision) and ~10x faster
+            # in sandbox testing (300 samples, CPU) -- the first full
+            # 114-subject run took 45+ min for a single fold with the
+            # per-sample loop, almost entirely kernel-launch/Python-loop
+            # overhead rather than real compute.
+            stats = train_epoch_batched(
                 encoder, head, resonance_head, train_batch, train_labels, ch_names, optimizer,
                 lambda1=lambda1, lambda2=lambda2, class_weights=class_weights,
             )

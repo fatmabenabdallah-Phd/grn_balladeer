@@ -72,28 +72,38 @@ def harmonic_loss(
     Hard quantization distance (no exp/sigma - contrast with
     compute_consonance_degree's soft version used in the symbolic loss).
 
-    omega: (n_nodes,) real tensor, one resonance frequency per node
-        (e.g. from extract_resonance_frequency).
+    omega: (n_nodes,) real tensor for a single graph, OR (B, n_nodes)
+        for a batch of graphs sharing the same node count (added this
+        session for the vectorized train_epoch path) - auto-handled via
+        ellipsis indexing (omega[..., idx]) rather than omega[idx],
+        which would incorrectly index the BATCH dimension instead of
+        nodes if omega had a leading batch dim.
     edge_pairs: (n_edges, 2) long tensor of (i, j) node index pairs
-        defining which pairs are constrained by this loss.
-    reduction: 'mean' (default, scale-invariant to graph/edge-set size)
-        or 'sum'.
+        defining which pairs are constrained by this loss (same edge
+        set applies to every sample in the batch, since they share the
+        same node count/montage).
+    reduction: 'mean' (default) or 'sum', taken over the PAIRS dimension
+        only (the last dim) - for a batched omega this returns (B,), not
+        a scalar; callers wanting one overall number for a batch take a
+        further .mean() themselves. For the original single-graph case
+        (omega: (n_nodes,)) this is unchanged (returns a scalar), since
+        there is only one dim to reduce over either way.
     """
     if edge_pairs.numel() == 0:
         raise ValueError("harmonic_loss: edge_pairs is empty - nothing to constrain.")
 
     i_idx = edge_pairs[:, 0]
     j_idx = edge_pairs[:, 1]
-    ratio = omega[i_idx] / omega[j_idx]
+    ratio = omega[..., i_idx] / omega[..., j_idx]  # (n_edges,) or (B, n_edges)
 
     ratios_t = torch.tensor(ratios, dtype=ratio.dtype, device=ratio.device)
-    diffs_sq = (ratio.unsqueeze(-1) - ratios_t) ** 2  # (n_edges, n_ratios)
-    min_diff_sq = diffs_sq.min(dim=-1).values  # (n_edges,)
+    diffs_sq = (ratio.unsqueeze(-1) - ratios_t) ** 2  # (..., n_edges, n_ratios)
+    min_diff_sq = diffs_sq.min(dim=-1).values  # (n_edges,) or (B, n_edges)
 
     if reduction == "mean":
-        return min_diff_sq.mean()
+        return min_diff_sq.mean(dim=-1)
     elif reduction == "sum":
-        return min_diff_sq.sum()
+        return min_diff_sq.sum(dim=-1)
     else:
         raise ValueError(f"harmonic_loss: unknown reduction '{reduction}', expected 'mean'/'sum'")
 

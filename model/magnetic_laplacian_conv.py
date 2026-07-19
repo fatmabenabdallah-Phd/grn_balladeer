@@ -71,24 +71,52 @@ class MagneticLaplacianConv(nn.Module):
         self.bias = nn.Parameter(torch.zeros(out_channels, dtype=torch.complex64))
 
     def forward(self, X: torch.Tensor, L_norm: torch.Tensor) -> torch.Tensor:
-        if X.shape[0] != L_norm.shape[0]:
+        """Accepts EITHER a single graph (X: (N,Cin), L_norm: (N,N)) --
+        the original, still-default usage everywhere else in the
+        project -- OR a batch of graphs sharing the same node count
+        but each with its own connectivity (X: (B,N,Cin), L_norm:
+        (B,N,N)), auto-detected from X.dim(). Added this session to
+        vectorize train_epoch's per-sample Python loop into one real
+        GPU batch call; NOT yet wired into train_epoch itself until
+        numerically verified identical to the per-sample loop (see
+        training/train_epoch_batched.py's own correctness test).
+
+        torch.matmul batches automatically over any leading dims, so
+        the Chebyshev recursion below is IDENTICAL code for both the
+        single-graph and batched case -- only self.weight[k] (K,Cin,Cout,
+        no batch dim) and self.bias (Cout,) need explicit unsqueezing to
+        broadcast correctly against a batched X.
+        """
+        if X.shape[-2] != L_norm.shape[-2]:
             raise ValueError(
-                f"MagneticLaplacianConv: X has {X.shape[0]} nodes but L_norm is {tuple(L_norm.shape)}"
+                f"MagneticLaplacianConv: X has {X.shape[-2]} nodes but L_norm is {tuple(L_norm.shape)}"
             )
         if not torch.is_complex(X):
             X = X.to(torch.complex64)
         if not torch.is_complex(L_norm):
             L_norm = L_norm.to(torch.complex64)
 
+        batched = X.dim() == 3  # (B, N, Cin) vs (N, Cin)
+
         # Chebyshev recursion: T_0 = X, T_1 = L_norm @ X, T_k = 2*L_norm@T_{k-1} - T_{k-2}
+        # torch.matmul batches transparently: (B,N,N)@(B,N,C) -> (B,N,C),
+        # or (N,N)@(N,C) -> (N,C) in the non-batched case -- same call.
         Tx_list = [X]
         if self.K > 1:
             Tx_list.append(L_norm @ X)
         for k in range(2, self.K):
             Tx_list.append(2 * (L_norm @ Tx_list[-1]) - Tx_list[-2])
 
-        out = self.bias.clone().unsqueeze(0).expand(X.shape[0], -1).clone()
+        if batched:
+            B = X.shape[0]
+            out = self.bias.clone().view(1, 1, -1).expand(B, X.shape[1], -1).clone()
+        else:
+            out = self.bias.clone().unsqueeze(0).expand(X.shape[0], -1).clone()
+
         for k in range(self.K):
+            # Tx_list[k]: (B,N,Cin) or (N,Cin); self.weight[k]: (Cin,Cout).
+            # matmul broadcasts the weight (no batch dim) against the
+            # batched Tx automatically -- no unsqueeze needed here.
             out = out + Tx_list[k] @ self.weight[k]
 
         if self.activation:

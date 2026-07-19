@@ -77,16 +77,26 @@ def symbolic_implication_loss(
 
     Fuzzy implication (mu_ij => confidence), consonance implies model
     confidence in the direction empirically determined by
-    determine_rule_direction. mu_ij: (n_pairs,) in [0, 1], from
-    compute_consonance_degree restricted to frontal pairs. confidence:
-    scalar or (n_pairs,) broadcastable - the classification head's
-    predicted probability for the correct class.
+    determine_rule_direction.
+
+    mu_ij: (n_pairs,) in [0, 1] for a single sample, OR (B, n_pairs) for
+        a batch (added this session for the vectorized train_epoch
+        path). confidence: scalar, (n_pairs,)-broadcastable for the
+        single-sample case, or (B,) for the batched case -- in the
+        batched case confidence is unsqueezed to (B, 1) here before
+        multiplying, since mu_ij * confidence would otherwise try to
+        broadcast (B, n_pairs) against (B,) directly, which fails/
+        misaligns rather than broadcasting per-sample as intended.
     """
+    if direction not in ("direct", "inverse"):
+        raise ValueError(f"symbolic_implication_loss: direction must be 'direct'/'inverse', got '{direction}'")
+
+    if torch.is_tensor(confidence) and confidence.dim() == mu_ij.dim() - 1:
+        confidence = confidence.unsqueeze(-1)  # (B,) -> (B,1), broadcasts against (B,n_pairs)
+
     if direction == "direct":
         truth = 1 - mu_ij + mu_ij * confidence
-    elif direction == "inverse":
-        truth = 1 - mu_ij + mu_ij * (1 - confidence)
     else:
-        raise ValueError(f"symbolic_implication_loss: direction must be 'direct'/'inverse', got '{direction}'")
+        truth = 1 - mu_ij + mu_ij * (1 - confidence)
 
     return (1 - truth).mean()
