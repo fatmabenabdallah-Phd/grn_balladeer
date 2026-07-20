@@ -48,13 +48,26 @@ def global_pool(node_embeddings: torch.Tensor, method: str = "mean") -> torch.Te
 class ClassificationHead(nn.Module):
     """MLP on the pooled graph-level embedding, producing 2-class
     logits (ADHD/control). Softmax is left to the loss function
-    (nn.CrossEntropyLoss expects raw logits) rather than applied here."""
+    (nn.CrossEntropyLoss expects raw logits) rather than applied here.
 
-    def __init__(self, in_features: int, hidden_features: int = 32, n_classes: int = 2):
+    dropout: added this session (previously 0, i.e. no regularization
+    at all) -- motivated by the diagnosed pattern of non-trivial
+    in-sample learning (train-subject AUC rising 0.546->0.610) paired
+    with chance-level held-out generalization (val AUC ~0.48-0.49
+    across a full 5-fold CV), which is the classic signature of
+    memorizing training-subject-specific idiosyncrasies rather than a
+    genuinely generalizable signal. Ablation across lr/batch_size/
+    embedding_dim/loss-weights this session ruled those out as the
+    cause, making regularization (untested until now) the next most
+    likely lever.
+    """
+
+    def __init__(self, in_features: int, hidden_features: int = 32, n_classes: int = 2, dropout: float = 0.3):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(in_features, hidden_features),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(hidden_features, n_classes),
         )
 

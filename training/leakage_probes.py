@@ -77,3 +77,62 @@ def check_sex_leakage(
         "n_samples": n_samples,
         "above_chance": bool(scores.mean() > chance_accuracy + 2 * scores.std()),
     }
+
+
+def check_subject_identity_leakage(
+    embeddings: np.ndarray, subject_ids: np.ndarray, cv_folds: int = 5, seed: int = 42
+) -> dict:
+    """Fits a multi-class logistic regression to predict WHICH subject
+    each epoch-level embedding came from, under standard (non-subject-
+    disjoint) stratified k-fold -- i.e. epochs from the same subject can
+    appear in both train and test folds here, unlike the model's real
+    training protocol. This is intentional: the question this probe
+    answers is "how much of the discriminative signal in these
+    embeddings is subject identity, as opposed to class-relevant EEG
+    state" -- not a re-test of generalization to unseen subjects (that's
+    what the real subject-disjoint CV already measures).
+
+    MOTIVATION (added this session): the first full 114-subject 5-fold
+    CV showed non-trivial in-sample (train-subject) AUC gains (0.546->
+    0.610 across training) but chance-level held-out AUC (0.489±0.042)
+    -- consistent with, though not proof of, the model latching onto
+    per-subject idiosyncrasies (impedance, individual EEG baseline)
+    that happen to correlate with class within a given training split,
+    rather than a genuinely generalizable ADHD signal. A HIGH subject-
+    identity recoverability here would support that interpretation
+    directly. Reuses check_sex_leakage's structure/interpretation
+    pattern above (see its own docstring for the sex-specific nuance,
+    which doesn't apply here -- there is no legitimate reason embeddings
+    SHOULD encode subject identity, unlike sex).
+
+    Returns {'mean_cv_accuracy', 'std_cv_accuracy', 'chance_accuracy',
+    'n_samples', 'n_subjects', 'above_chance'}. chance_accuracy here is
+    the majority-class (most-epochs-per-subject) baseline, generalizing
+    check_sex_leakage's binary chance calculation to the multi-class
+    case.
+    """
+    n_samples = len(subject_ids)
+    unique_subjects, counts = np.unique(subject_ids, return_counts=True)
+    n_subjects = len(unique_subjects)
+
+    if n_samples < cv_folds * n_subjects:
+        raise ValueError(
+            f"check_subject_identity_leakage: {n_samples} samples, {n_subjects} subjects, "
+            f"{cv_folds}-fold CV needs at least {cv_folds} samples per subject on average - "
+            "not satisfied here. Reduce cv_folds or provide more epochs per subject."
+        )
+
+    chance_accuracy = counts.max() / n_samples
+
+    clf = LogisticRegression(max_iter=1000)
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=seed)
+    scores = cross_val_score(clf, embeddings, subject_ids, cv=skf, scoring="accuracy")
+
+    return {
+        "mean_cv_accuracy": float(scores.mean()),
+        "std_cv_accuracy": float(scores.std()),
+        "chance_accuracy": float(chance_accuracy),
+        "n_samples": n_samples,
+        "n_subjects": n_subjects,
+        "above_chance": bool(scores.mean() > chance_accuracy + 2 * scores.std()),
+    }

@@ -88,6 +88,8 @@ def train_fold(
     device: Optional[torch.device] = None,
     eval_every: int = 20,
     batch_size: Optional[int] = 64,
+    weight_decay: float = 1e-4,
+    dropout: float = 0.3,
 ) -> dict:
     """Trains ONE fold from scratch (fresh model, fresh optimizer -
     folds must not share weights, that would leak information across
@@ -119,7 +121,7 @@ def train_fold(
     torch.manual_seed(seed)
     encoder = GRNEncoder(in_channels=in_channels, hidden_channels=[16, embedding_dim], K=3).to(device)
     resonance_head = build_resonance_head(embedding_dim=embedding_dim).to(device)
-    head = ClassificationHead(in_features=2 * embedding_dim, n_classes=2).to(device)
+    head = ClassificationHead(in_features=2 * embedding_dim, n_classes=2, dropout=dropout).to(device)
 
     if dual_branch:
         aux_encoder = AuxBranchEncoder().to(device)
@@ -129,7 +131,7 @@ def train_fold(
     else:
         params = list(encoder.parameters()) + list(resonance_head.parameters()) + list(head.parameters())
 
-    optimizer = torch.optim.Adam(params, lr=lr)
+    optimizer = torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
 
     # NEW this session: inverse-frequency class weights, computed from
     # THIS FOLD's train labels only (not the global cohort ratio) --
