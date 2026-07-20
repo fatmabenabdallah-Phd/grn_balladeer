@@ -246,11 +246,14 @@ def train_fold(
     collapse = check_omega_collapse(history[-1]["last_omega"])
 
     # Leave the model in eval mode for the caller (e.g. embedding
-    # extraction for check_subject_identity_leakage) -- _evaluate_val_
+    # extraction for check_subject_identity_leakage, or recomputing
+    # probabilities with a calibrated threshold) -- _evaluate_val_
     # batched() switches back to .train() internally after computing its
     # own metrics, so this must be set again here, after all evaluation
     # calls are done.
     encoder.eval(); resonance_head.eval(); head.eval()
+    if dual_branch:
+        aux_encoder.eval(); fusion.eval()
 
     return {
         "eval_result": result,
@@ -261,10 +264,14 @@ def train_fold(
         # NEW this session: expose the trained model itself (already in
         # .eval() mode) so callers can extract embeddings afterward --
         # e.g. for check_subject_identity_leakage, which needs per-epoch
-        # pooled embeddings that train_fold doesn't compute/return itself.
+        # pooled embeddings that train_fold doesn't compute/return itself,
+        # and for recomputing probabilities with a calibrated decision
+        # threshold (find_optimal_threshold) instead of the fixed 0.5 cutoff.
         "encoder": encoder,
         "resonance_head": resonance_head,
         "head": head,
+        "aux_encoder": aux_encoder if dual_branch else None,
+        "fusion": fusion if dual_branch else None,
     }
 
 
