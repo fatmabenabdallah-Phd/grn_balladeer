@@ -86,6 +86,7 @@ def train_fold(
     lambda3: float = 1.0,
     embedding_dim: int = 8,
     device: Optional[torch.device] = None,
+    eval_every: int = 20,
 ) -> dict:
     """Trains ONE fold from scratch (fresh model, fresh optimizer -
     folds must not share weights, that would leak information across
@@ -137,8 +138,39 @@ def train_fold(
     class_counts = torch.bincount(train_labels, minlength=2).float()
     class_weights = (class_counts.sum() / (2.0 * class_counts)).to(device)
 
+    # NEW this session: stack the EEG-only training batch ONCE, before
+    # the epoch loop -- train_epoch_batched used to do this stacking
+    # itself on every call (60x for a 60-epoch fold), which was itself
+    # a real per-sample overhead cost across ~4600 samples, the same
+    # KIND of problem vectorizing the encoder call was meant to solve.
+    if not dual_branch:
+        train_X_batch = torch.stack([X_i for X_i, _ in train_batch])   # (B, N, Cin)
+        train_L_batch = torch.stack([L_i for _, L_i in train_batch])   # (B, N, N)
+        val_X_batch = torch.stack([X_i for X_i, _ in val_batch])       # (B_val, N, Cin)
+        val_L_batch = torch.stack([L_i for _, L_i in val_batch])       # (B_val, N, N)
+
+    def _evaluate_val_batched():
+        """EEG-only-only helper: one batched forward pass over the held-
+        out subjects, no grad. Used both for the final evaluation AND
+        (new this session) periodic mid-training checkpoints, so the
+        val-performance trajectory is visible, not just its endpoint --
+        needed to tell apart 'never learns anything generalizable' from
+        'overfits partway through training' (the current ambiguity after
+        a 300-epoch/lr=1e-2 diagnostic run showed falling train loss but
+        below-chance final val AUC)."""
+        encoder.eval(); resonance_head.eval(); head.eval()
+        with torch.no_grad():
+            h_val = encoder(val_X_batch, val_L_batch)
+            z_val = global_pool(split_real_imag(h_val), method="mean")
+            logits_val = head(z_val)
+            probs_val = torch.softmax(logits_val, dim=-1)[:, 1].cpu().numpy()
+            preds_val = logits_val.argmax(dim=-1).cpu().numpy()
+        encoder.train(); resonance_head.train(); head.train()
+        return evaluate(val_labels.cpu().numpy(), preds_val, probs_val)
+
     history = []
-    for _ in range(n_epochs):
+    val_trajectory = []  # NEW: (epoch_idx, EvalResult) pairs, EEG-only path only
+    for epoch_idx in range(n_epochs):
         if dual_branch:
             stats = train_epoch_dual_branch(
                 encoder, resonance_head, aux_encoder, fusion, head,
@@ -155,41 +187,45 @@ def train_fold(
             # in sandbox testing (300 samples, CPU) -- the first full
             # 114-subject run took 45+ min for a single fold with the
             # per-sample loop, almost entirely kernel-launch/Python-loop
-            # overhead rather than real compute.
+            # overhead rather than real compute. Pre-stacked tensors passed
+            # directly (see train_X_batch/train_L_batch above) rather than
+            # re-stacking inside the function on every epoch.
             stats = train_epoch_batched(
-                encoder, head, resonance_head, train_batch, train_labels, ch_names, optimizer,
+                encoder, head, resonance_head, train_X_batch, train_L_batch, train_labels, ch_names, optimizer,
                 lambda1=lambda1, lambda2=lambda2, class_weights=class_weights,
             )
         history.append(stats)
 
-    # --- evaluation on held-out subjects ---
-    encoder.eval(); resonance_head.eval(); head.eval()
-    if dual_branch:
-        aux_encoder.eval(); fusion.eval()
+        if not dual_branch and eval_every > 0 and (epoch_idx % eval_every == 0 or epoch_idx == n_epochs - 1):
+            val_trajectory.append((epoch_idx, _evaluate_val_batched()))
 
-    with torch.no_grad():
-        logits_list = []
-        for i in range(len(val_batch)):
-            X_i, L_norm_i = val_batch[i]
-            h_i = encoder(X_i, L_norm_i)
-            z_eeg_i = global_pool(split_real_imag(h_i))
-            if dual_branch:
+    # --- final evaluation on held-out subjects ---
+    if dual_branch:
+        encoder.eval(); resonance_head.eval(); head.eval()
+        aux_encoder.eval(); fusion.eval()
+        with torch.no_grad():
+            logits_list = []
+            for i in range(len(val_batch)):
+                X_i, L_norm_i = val_batch[i]
+                h_i = encoder(X_i, L_norm_i)
+                z_eeg_i = global_pool(split_real_imag(h_i))
                 aux_vec = aux_vectors_by_subject[val_ids[i]]
                 z_aux_i = aux_encoder(torch.tensor(aux_vec, dtype=torch.float32, device=device).unsqueeze(0))
                 z_i, _, _ = fusion(z_eeg_i.unsqueeze(0), z_aux_i)
-            else:
-                z_i = z_eeg_i.unsqueeze(0)
-            logits_list.append(head(z_i))
-        val_logits = torch.cat(logits_list, dim=0)
-        val_probs = torch.softmax(val_logits, dim=-1)[:, 1].cpu().numpy()  # P(class=1=ADHD)
-        val_preds = val_logits.argmax(dim=-1).cpu().numpy()
+                logits_list.append(head(z_i))
+            val_logits = torch.cat(logits_list, dim=0)
+            val_probs = torch.softmax(val_logits, dim=-1)[:, 1].cpu().numpy()
+            val_preds = val_logits.argmax(dim=-1).cpu().numpy()
+        result = evaluate(val_labels.cpu().numpy(), val_preds, val_probs)
+    else:
+        result = _evaluate_val_batched()
 
-    result = evaluate(val_labels.cpu().numpy(), val_preds, val_probs)
     collapse = check_omega_collapse(history[-1]["last_omega"])
 
     return {
         "eval_result": result,
         "history": history,
+        "val_trajectory": val_trajectory,
         "val_subject_ids": val_subject_ids,
         "final_omega_collapse": collapse,
     }
