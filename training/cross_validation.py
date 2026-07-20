@@ -241,12 +241,26 @@ def train_fold(
 
     collapse = check_omega_collapse(history[-1]["last_omega"])
 
+    # Leave the model in eval mode for the caller (e.g. embedding
+    # extraction for check_subject_identity_leakage) -- _evaluate_val_
+    # batched() switches back to .train() internally after computing its
+    # own metrics, so this must be set again here, after all evaluation
+    # calls are done.
+    encoder.eval(); resonance_head.eval(); head.eval()
+
     return {
         "eval_result": result,
         "history": history,
         "val_trajectory": val_trajectory,
         "val_subject_ids": val_subject_ids,
         "final_omega_collapse": collapse,
+        # NEW this session: expose the trained model itself (already in
+        # .eval() mode) so callers can extract embeddings afterward --
+        # e.g. for check_subject_identity_leakage, which needs per-epoch
+        # pooled embeddings that train_fold doesn't compute/return itself.
+        "encoder": encoder,
+        "resonance_head": resonance_head,
+        "head": head,
     }
 
 
