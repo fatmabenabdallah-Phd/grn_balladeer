@@ -87,6 +87,7 @@ def train_fold(
     embedding_dim: int = 8,
     device: Optional[torch.device] = None,
     eval_every: int = 20,
+    batch_size: Optional[int] = 64,
 ) -> dict:
     """Trains ONE fold from scratch (fresh model, fresh optimizer -
     folds must not share weights, that would leak information across
@@ -170,6 +171,8 @@ def train_fold(
 
     history = []
     val_trajectory = []  # NEW: (epoch_idx, EvalResult) pairs, EEG-only path only
+    n_train_samples = train_X_batch.shape[0] if not dual_branch else len(train_batch)
+
     for epoch_idx in range(n_epochs):
         if dual_branch:
             stats = train_epoch_dual_branch(
@@ -181,19 +184,33 @@ def train_fold(
                 # same majority-class collapse as the EEG-only run did.
             )
         else:
+            # NEW this session: real mini-batch training instead of one
+            # full-batch gradient step per epoch. Diagnosed root cause of
+            # the low in-sample AUC ceiling (~0.61 after 300 full-batch
+            # steps, evaluated on the TRAINING subjects themselves): full-
+            # batch GD gives only n_epochs total gradient updates
+            # regardless of dataset size -- with batch_size=64 on ~4600
+            # samples, each epoch now does ~72 gradient steps instead of 1,
+            # a ~72x increase in optimization steps for the same n_epochs.
             # Switched to the vectorized train_epoch_batched this session --
             # verified numerically equivalent to train_epoch (logits, l_task,
             # l_harm, l_symb all matched to float precision) and ~10x faster
-            # in sandbox testing (300 samples, CPU) -- the first full
-            # 114-subject run took 45+ min for a single fold with the
-            # per-sample loop, almost entirely kernel-launch/Python-loop
-            # overhead rather than real compute. Pre-stacked tensors passed
-            # directly (see train_X_batch/train_L_batch above) rather than
-            # re-stacking inside the function on every epoch.
-            stats = train_epoch_batched(
-                encoder, head, resonance_head, train_X_batch, train_L_batch, train_labels, ch_names, optimizer,
-                lambda1=lambda1, lambda2=lambda2, class_weights=class_weights,
-            )
+            # per call in sandbox testing.
+            if batch_size is None or batch_size >= n_train_samples:
+                stats = train_epoch_batched(
+                    encoder, head, resonance_head, train_X_batch, train_L_batch, train_labels, ch_names, optimizer,
+                    lambda1=lambda1, lambda2=lambda2, class_weights=class_weights,
+                )
+            else:
+                perm = torch.randperm(n_train_samples, device=device)
+                last_stats = None
+                for start in range(0, n_train_samples, batch_size):
+                    idx = perm[start:start + batch_size]
+                    last_stats = train_epoch_batched(
+                        encoder, head, resonance_head, train_X_batch[idx], train_L_batch[idx], train_labels[idx],
+                        ch_names, optimizer, lambda1=lambda1, lambda2=lambda2, class_weights=class_weights,
+                    )
+                stats = last_stats  # history records the LAST mini-batch's stats for this epoch
         history.append(stats)
 
         if not dual_branch and eval_every > 0 and (epoch_idx % eval_every == 0 or epoch_idx == n_epochs - 1):
