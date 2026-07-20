@@ -177,13 +177,17 @@ def train_fold(
 
     for epoch_idx in range(n_epochs):
         if dual_branch:
+            # NEW this session: class_weights now supported here too
+            # (mirrors the EEG-only fix) -- important before testing
+            # dual-branch, to avoid the same majority-class collapse
+            # found in the very first EEG-only run. Still NOT vectorized/
+            # mini-batched like the EEG-only path (train_epoch_dual_branch
+            # remains the original per-sample loop) -- expect this to be
+            # noticeably slower per epoch than the EEG-only path.
             stats = train_epoch_dual_branch(
                 encoder, resonance_head, aux_encoder, fusion, head,
                 train_batch, train_labels, train_ids, aux_vectors_by_subject, ch_names, optimizer,
-                lambda1=lambda1, lambda2=lambda2, lambda3=lambda3,
-                # TODO: train_epoch_dual_branch does not yet accept
-                # class_weights -- add if the dual-branch run shows the
-                # same majority-class collapse as the EEG-only run did.
+                lambda1=lambda1, lambda2=lambda2, lambda3=lambda3, class_weights=class_weights,
             )
         else:
             # NEW this session: real mini-batch training instead of one

@@ -60,6 +60,7 @@ def train_epoch_dual_branch(
     lambda3: float = 1.0,
     triplet_margin: float = 1.0,
     pool_method: str = "mean",
+    class_weights: "torch.Tensor | None" = None,
 ) -> dict:
     """One training epoch, dual-branch (EEG + aux, fused). batch/labels/
     ch_names as in train_epoch.py. subject_ids: (n_samples,) list, same
@@ -106,7 +107,7 @@ def train_epoch_dual_branch(
 
     z_joint_batch = torch.stack(z_joint_list, dim=0)  # (n_samples, hidden_dim)
     logits = head(z_joint_batch)
-    l_task = nn.functional.cross_entropy(logits, labels)
+    l_task = nn.functional.cross_entropy(logits, labels, weight=class_weights)
 
     # l_symb needs softmax(logits), which needs the full batch's logits first - this
     # second pass reuses omega_per_sample (no encoder call), not a fresh forward pass.
