@@ -49,7 +49,8 @@ def train_epoch_batched(
     encoder: GRNEncoder,
     head: ClassificationHead,
     resonance_head: nn.Module,
-    batch: List[Tuple[torch.Tensor, torch.Tensor]],
+    X_batch: torch.Tensor,
+    L_batch: torch.Tensor,
     labels: torch.Tensor,
     ch_names: List[str],
     optimizer: torch.optim.Optimizer,
@@ -59,15 +60,25 @@ def train_epoch_batched(
     pool_method: str = "mean",
     class_weights: "torch.Tensor | None" = None,
 ) -> dict:
-    """Same signature, same return dict, same loss semantics as
-    train_epoch() -- ONLY the internal computation is vectorized (one
-    encoder forward call over a stacked batch, instead of one call per
-    sample in a Python loop). Verified numerically equivalent to
-    train_epoch() on identical inputs/weights (see this session's test:
-    logits, l_task, l_harm, l_symb all matched).
+    """Same loss semantics as train_epoch()/the original train_epoch_
+    batched -- CHANGED this session: takes already-stacked X_batch
+    (B,N,Cin) / L_batch (B,N,N) tensors directly, rather than a list of
+    (X_i, L_norm_i) tuples that got re-stacked via torch.stack INSIDE
+    this function on every single call.
 
-    batch: list of (X_i, L_norm_i), one per sample -- same input format
-    as train_epoch(), stacked internally into (B,N,Cin)/(B,N,N) tensors.
+    WHY THIS CHANGED: the training loop calls this function once per
+    epoch (e.g. 60x for a 60-epoch fold). The original version re-ran
+    torch.stack over ~4600 individual per-sample GPU tensors on EVERY
+    one of those 60 calls -- itself hundreds of thousands of small GPU
+    memory operations across a full fold, i.e. a real cost of the same
+    KIND (many small ops instead of one big one) that vectorizing the
+    encoder call was meant to eliminate in the first place. Stacking
+    once before the epoch loop (see cross_validation.train_fold) and
+    passing the ready-made tensors here removes this.
+
+    Callers: build X_batch/L_batch ONCE via
+    torch.stack([X_i for X_i, _ in batch]) / torch.stack([L_i for _, L_i in batch])
+    before entering the n_epochs loop, not inside it.
     """
     encoder.train()
     head.train()
@@ -75,11 +86,7 @@ def train_epoch_batched(
     optimizer.zero_grad()
 
     frontal_pairs = get_frontal_pairs(ch_names)
-    all_pairs = all_pairs_edge_index(batch[0][0].shape[0])
-
-    # Stack the whole fold into one batch -- this is the key change.
-    X_batch = torch.stack([X_i for X_i, _ in batch])          # (B, N, Cin)
-    L_batch = torch.stack([L_i for _, L_i in batch])          # (B, N, N)
+    all_pairs = all_pairs_edge_index(X_batch.shape[1])
 
     h_batch = encoder(X_batch, L_batch)                        # (B, N, d) complex, ONE call
     z_eeg_batch = global_pool(split_real_imag(h_batch), method=pool_method)  # (B, 2d)
