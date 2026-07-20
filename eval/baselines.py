@@ -17,7 +17,7 @@ from scipy.signal import welch
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     accuracy_score, balanced_accuracy_score, f1_score, roc_auc_score,
-    precision_recall_fscore_support, confusion_matrix,
+    precision_recall_fscore_support, confusion_matrix, roc_curve,
 )
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -145,6 +145,42 @@ class EvalResult:
     f1_class1: float
     sensitivity: float  # recall on class 1 (ADHD, per data.labels' label=1 convention)
     specificity: float  # recall on class 0 (Control)
+
+
+def find_optimal_threshold(y_true: np.ndarray, y_proba: np.ndarray) -> dict:
+    """Finds the decision threshold maximizing Youden's J statistic
+    (sensitivity + specificity - 1) on the ROC curve, rather than the
+    default fixed 0.5 cutoff.
+
+    Added this session to address a real observed pattern: a model can
+    have a genuinely informative AUC (e.g. 0.68-0.77 on the EDA-real-only
+    dual-branch subset) while STILL always predicting the majority class
+    at threshold=0.5 (sensitivity=1.0, specificity=0.0) when classes are
+    imbalanced (~77%/23% ADHD/Control on that subset) -- the model IS
+    ranking correctly, the cutoff is just miscalibrated for this
+    imbalance.
+
+    CRITICAL CORRECT USAGE -- calibrate the threshold on TRAINING data's
+    own predicted probabilities (or a held-out slice of train), THEN
+    apply that fixed threshold to validation predictions. Calling this
+    function on validation labels/probabilities and using the result to
+    re-score performance on those SAME validation samples is a form of
+    leakage (choosing the cutoff to fit the exact data you're evaluating
+    on) and will overstate performance -- only use this on train data
+    when the goal is an honest, reportable validation metric.
+
+    Returns {'threshold', 'sensitivity_at_threshold', 'specificity_at_threshold',
+    'youden_j'}.
+    """
+    fpr, tpr, thresholds = roc_curve(y_true, y_proba)
+    j_scores = tpr - fpr
+    best_idx = int(np.argmax(j_scores))
+    return {
+        "threshold": float(thresholds[best_idx]),
+        "sensitivity_at_threshold": float(tpr[best_idx]),
+        "specificity_at_threshold": float(1 - fpr[best_idx]),
+        "youden_j": float(j_scores[best_idx]),
+    }
 
 
 def evaluate(y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndarray) -> EvalResult:
