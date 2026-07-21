@@ -70,10 +70,25 @@ def build_all_subjects_datasets(
     flags_path: str,
     level_priority: Tuple[str, ...] = LEVEL_PRIORITY,
     verbose: bool = True,
+    checkpoint_dir: Optional[str] = None,
 ) -> Tuple[Dict[str, List[Tuple[torch.Tensor, torch.Tensor]]], Dict[str, str], List[str]]:
     """Builds (X_i, L_norm_i) graph datasets for as many of subject_ids
     as have a usable CGX+TAGS pair at SOME level, using resolve_subject_
     level's priority order.
+
+    checkpoint_dir: NEW this session -- if given, checks for an existing
+    checkpoint before calling build_subject_dataset, and saves a new one
+    after building. Uses the EXACT SAME filename convention as the
+    Colab driver's Stage 3 (real_dataset_{subject_id}_L{level}.pt), so
+    if this points at the same
+    /content/drive/MyDrive/BALLADEER_GRN_checkpoints/datasets directory
+    already used for the 114 Level1-only subjects, those are genuinely
+    reloaded instantly rather than rebuilt -- this only matters for
+    subjects resolve_subject_level assigns to Level1 (the 114 already
+    covered); subjects newly reached via the Level6/11 fallback have no
+    prior checkpoint and will be built fresh regardless.
+    If None (default), no caching -- behavior identical to before this
+    change.
 
     Returns (dataset_by_subject, level_used_by_subject, unusable_subject_ids):
     - dataset_by_subject: ready for training.cross_validation.run_cross_
@@ -86,15 +101,33 @@ def build_all_subjects_datasets(
       for some (per the dataset's documented CGX/TAGS coverage gap), not
       a bug. Report this count rather than silently dropping them.
     """
+    import os
+
     dataset_by_subject: Dict[str, List[Tuple[torch.Tensor, torch.Tensor]]] = {}
     level_used_by_subject: Dict[str, str] = {}
     unusable_subject_ids: List[str] = []
+    loaded_from_checkpoint = 0
+    newly_built = 0
+
+    if checkpoint_dir is not None:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     for subject_id in subject_ids:
         resolution = resolve_subject_level(dataset_root, subject_id, level_priority)
         if resolution.level is None:
             unusable_subject_ids.append(subject_id)
             continue
+
+        ckpt_path = None
+        if checkpoint_dir is not None:
+            ckpt_path = os.path.join(
+                checkpoint_dir, f"real_dataset_{subject_id}_L{resolution.level}.pt"
+            )
+            if os.path.exists(ckpt_path):
+                dataset_by_subject[subject_id] = torch.load(ckpt_path)
+                level_used_by_subject[subject_id] = resolution.level
+                loaded_from_checkpoint += 1
+                continue
 
         try:
             dataset = build_subject_dataset(
@@ -109,14 +142,22 @@ def build_all_subjects_datasets(
             unusable_subject_ids.append(subject_id)
             continue
 
+        if ckpt_path is not None:
+            torch.save(dataset, ckpt_path)
+
         dataset_by_subject[subject_id] = dataset
         level_used_by_subject[subject_id] = resolution.level
+        newly_built += 1
 
     if verbose:
         from collections import Counter
         level_counts = Counter(level_used_by_subject.values())
+        cache_note = (
+            f" ({loaded_from_checkpoint} depuis le cache Drive, {newly_built} nouveaux)"
+            if checkpoint_dir is not None else ""
+        )
         print(f"[build_all_subjects_datasets] {len(dataset_by_subject)}/{len(subject_ids)} "
-              f"subjects usable. Level breakdown: {dict(level_counts)}. "
+              f"subjects usable{cache_note}. Level breakdown: {dict(level_counts)}. "
               f"{len(unusable_subject_ids)} subjects with no usable CGX at any level.")
 
     return dataset_by_subject, level_used_by_subject, unusable_subject_ids
