@@ -44,7 +44,7 @@ def build_subject_dataset(
     cgx_path: str,
     flags_path: str,
     level: str,
-    band: Tuple[float, float] = (8.0, 13.0),
+    bands: List[Tuple[float, float]] = ((4.0, 8.0), (8.0, 13.0), (13.0, 30.0)),
     hop_length: int = 32,
     return_epochs: bool = False,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
@@ -70,9 +70,23 @@ def build_subject_dataset(
     against slackline_flags_info.json, or direct session metadata) is
     the caller's responsibility; pass the confirmed level explicitly.
 
-    band: connectivity band for PLV/phase-diff, default alpha (8-13Hz),
-    consistent with prior sessions (Week 2 frontal/parieto-occipital
-    cluster finding was on this band). Not yet swept across other bands.
+    bands: CHANGED this session -- was a single band tuple (default
+    alpha 8-13Hz only), now a list of bands, default theta+alpha+beta
+    ((4,8),(8,13),(13,30)). Motivation: the harmonic/symbolic losses
+    (L_harm, L_symb) are grounded in CROSS-frequency phase synchrony
+    literature (Palva et al.) and the theta/beta ratio ADHD literature
+    (Barry et al., Snyder & Hall) -- both about relationships BETWEEN
+    bands -- but the adjacency itself was previously built from a
+    SINGLE band's phase (alpha only), meaning the graph structure the
+    model actually sees carried no direct cross-band information
+    despite the loss terms' theoretical grounding assuming it might.
+    The complex edge-weight matrices W_band from each band are
+    averaged (before Laplacian construction) into a single combined W,
+    from which ONE magnetic Laplacian is built -- i.e. still one graph
+    per epoch, now reflecting theta+alpha+beta synchrony jointly
+    rather than alpha alone. Passing a single-element list (e.g.
+    [(8.0, 13.0)]) exactly reproduces the old alpha-only behavior --
+    this change is backward compatible, not a breaking one.
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
@@ -110,11 +124,28 @@ def build_subject_dataset(
         X_i = build_node_feature_matrix(per_channel_pooled)
 
         epoch_signal = epoch_data_all[i]
-        band_signal = extract_band_signal(epoch_signal, band, sfreq)
-        phases = compute_instantaneous_phase(band_signal)
-        plv = compute_plv_matrix(phases)
-        phase_diff = compute_mean_phase_diff(phases)
-        W = build_complex_edge_weights(plv, phase_diff)
+
+        # NEW this session: average connectivity across all requested bands
+        # (default theta+alpha+beta) into ONE combined adjacency, rather than
+        # using a single band (alpha only, as before) -- see this function's
+        # docstring for why this matters given L_harm/L_symb's cross-frequency
+        # theoretical grounding. plv is also averaged (not just W) since
+        # build_magnetic_laplacian needs a real-valued plv magnitude matrix
+        # alongside the complex W, and averaging each band's own valid PLV
+        # (each in [0,1]) keeps that property (average of values in [0,1] is
+        # still in [0,1]), unlike e.g. re-deriving plv from the averaged W.
+        W_per_band = []
+        plv_per_band = []
+        for band in bands:
+            band_signal = extract_band_signal(epoch_signal, band, sfreq)
+            phases = compute_instantaneous_phase(band_signal)
+            plv_band = compute_plv_matrix(phases)
+            phase_diff_band = compute_mean_phase_diff(phases)
+            W_per_band.append(build_complex_edge_weights(plv_band, phase_diff_band))
+            plv_per_band.append(plv_band)
+
+        W = np.mean(W_per_band, axis=0)
+        plv = np.mean(plv_per_band, axis=0)
         L_C = build_magnetic_laplacian(W, plv)
         L_norm_i = compute_normalized_laplacian(torch.from_numpy(L_C).to(torch.complex64))
 
