@@ -46,11 +46,23 @@ def build_subject_dataset(
     level: str,
     band: Tuple[float, float] = (8.0, 13.0),
     hop_length: int = 32,
+    return_epochs: bool = False,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Runs the full Module 2b -> 3 -> 4 chain on one subject's real CGX
     file and returns a list of (X_i, L_norm_i) graphs, one per epoch
     kept by epoch_by_flag_events (events outside the recording's
     available range are dropped, not an error -- see epoching.py).
+
+    return_epochs: NEW this session -- if True, ALSO returns the raw
+    mne.Epochs object used internally to build the graphs, as
+    (dataset, epochs) instead of just dataset. Added so baseline
+    comparisons (eval.baselines.extract_band_power_features, which
+    needs raw epoched EEG, not the CQT-encoded complex graph tensors
+    this function otherwise returns) can be computed on EXACTLY the
+    same epochs GRN sees, rather than a separately re-run preprocessing
+    pass that could silently diverge (different ICA components dropped,
+    different kept-epoch count, etc.) and make the comparison unfair
+    without anyone noticing.
 
     level: one of the 'level' values in slackline_flags_info.json
     (e.g. 'Level1'). This function does NOT infer the level from the
@@ -108,4 +120,6 @@ def build_subject_dataset(
 
         dataset.append((X_i, L_norm_i))
 
+    if return_epochs:
+        return dataset, epochs
     return dataset
