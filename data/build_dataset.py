@@ -32,6 +32,7 @@ from grn_balladeer.connectivity.phase_connectivity import (
     extract_band_signal,
     compute_instantaneous_phase,
     compute_plv_matrix,
+    compute_pli_matrix,
     compute_mean_phase_diff,
     build_complex_edge_weights,
     build_magnetic_laplacian,
@@ -47,6 +48,7 @@ def build_subject_dataset(
     bands: List[Tuple[float, float]] = ((4.0, 8.0), (8.0, 13.0), (13.0, 30.0)),
     hop_length: int = 32,
     return_epochs: bool = False,
+    connectivity_metric: str = "plv",
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Runs the full Module 2b -> 3 -> 4 chain on one subject's real CGX
     file and returns a list of (X_i, L_norm_i) graphs, one per epoch
@@ -87,6 +89,18 @@ def build_subject_dataset(
     rather than alpha alone. Passing a single-element list (e.g.
     [(8.0, 13.0)]) exactly reproduces the old alpha-only behavior --
     this change is backward compatible, not a breaking one.
+
+    connectivity_metric: NEW this session -- 'plv' (default, unchanged
+    behavior) or 'pli' (Phase Lag Index, an alternative connectivity
+    measure less sensitive to volume conduction/zero-lag artifacts than
+    PLV, since PLI discards exact zero-phase-lag synchrony by
+    construction -- reserved for this ablation since Week 2, per
+    connectivity/phase_connectivity.py's own compute_pli_matrix
+    docstring). Only the amplitude/strength matrix changes between the
+    two metrics (PLV vs PLI); the mean phase-difference matrix feeding
+    into the complex edge weights is computed identically either way,
+    since PLI itself has no natural phase-difference counterpart (it
+    discards phase sign by construction).
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
@@ -129,24 +143,32 @@ def build_subject_dataset(
         # (default theta+alpha+beta) into ONE combined adjacency, rather than
         # using a single band (alpha only, as before) -- see this function's
         # docstring for why this matters given L_harm/L_symb's cross-frequency
-        # theoretical grounding. plv is also averaged (not just W) since
-        # build_magnetic_laplacian needs a real-valued plv magnitude matrix
-        # alongside the complex W, and averaging each band's own valid PLV
-        # (each in [0,1]) keeps that property (average of values in [0,1] is
-        # still in [0,1]), unlike e.g. re-deriving plv from the averaged W.
+        # theoretical grounding. The strength matrix (PLV or PLI, per
+        # connectivity_metric) is also averaged across bands (not just W)
+        # since build_magnetic_laplacian needs a real-valued magnitude
+        # matrix alongside the complex W, and averaging each band's own
+        # valid strength values (each in [0,1] for both PLV and PLI) keeps
+        # that property, unlike e.g. re-deriving it from the averaged W.
+        if connectivity_metric == "plv":
+            strength_fn = compute_plv_matrix
+        elif connectivity_metric == "pli":
+            strength_fn = compute_pli_matrix
+        else:
+            raise ValueError(f"connectivity_metric must be 'plv' or 'pli', got '{connectivity_metric}'")
+
         W_per_band = []
-        plv_per_band = []
+        strength_per_band = []
         for band in bands:
             band_signal = extract_band_signal(epoch_signal, band, sfreq)
             phases = compute_instantaneous_phase(band_signal)
-            plv_band = compute_plv_matrix(phases)
+            strength_band = strength_fn(phases)
             phase_diff_band = compute_mean_phase_diff(phases)
-            W_per_band.append(build_complex_edge_weights(plv_band, phase_diff_band))
-            plv_per_band.append(plv_band)
+            W_per_band.append(build_complex_edge_weights(strength_band, phase_diff_band))
+            strength_per_band.append(strength_band)
 
         W = np.mean(W_per_band, axis=0)
-        plv = np.mean(plv_per_band, axis=0)
-        L_C = build_magnetic_laplacian(W, plv)
+        strength = np.mean(strength_per_band, axis=0)
+        L_C = build_magnetic_laplacian(W, strength)
         L_norm_i = compute_normalized_laplacian(torch.from_numpy(L_C).to(torch.complex64))
 
         dataset.append((X_i, L_norm_i))
