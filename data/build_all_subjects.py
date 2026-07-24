@@ -124,7 +124,13 @@ def build_all_subjects_datasets(
                 checkpoint_dir, f"real_dataset_{subject_id}_L{resolution.level}.pt"
             )
             if os.path.exists(ckpt_path):
-                dataset_by_subject[subject_id] = torch.load(ckpt_path)
+                # weights_only=False: PyTorch 2.6+ changed the default to True,
+                # which rejects numpy arrays embedded in the checkpoint (our
+                # complex-valued graph tensors were built via numpy before
+                # converting to torch). These are our own trusted checkpoints
+                # written by this same codebase, not third-party files, so
+                # explicitly opting into the pre-2.6 behavior is appropriate here.
+                dataset_by_subject[subject_id] = torch.load(ckpt_path, weights_only=False)
                 level_used_by_subject[subject_id] = resolution.level
                 loaded_from_checkpoint += 1
                 continue
