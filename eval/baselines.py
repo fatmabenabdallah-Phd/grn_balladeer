@@ -140,10 +140,34 @@ def train_svm_baseline(features: np.ndarray, labels: np.ndarray) -> Tuple[SVC, S
     return clf, scaler
 
 
-def train_rf_baseline(features: np.ndarray, labels: np.ndarray) -> RandomForestClassifier:
-    """Random Forest — no standardization needed."""
+def train_rf_baseline(
+    features: np.ndarray,
+    labels: np.ndarray,
+    n_estimators: int = 300,
+    max_depth: "int | None" = None,
+    max_features: "str | float" = "sqrt",
+    min_samples_split: int = 2,
+    min_samples_leaf: int = 1,
+    random_state: int = 42,
+) -> RandomForestClassifier:
+    """Random Forest — no standardization needed.
+
+    NEW this session: hyperparameters exposed for Optuna tuning
+    (n_estimators, max_depth, max_features, min_samples_split,
+    min_samples_leaf), defaulting to this project's original
+    hard-coded values (n_estimators=300, max_depth=None, class_weight=
+    'balanced') for full backward compatibility with the already-
+    reported RF baseline result (AUC=0.668) -- calling this with no
+    extra arguments reproduces that result exactly. max_features
+    previously used scikit-learn's implicit default; made explicit here
+    as 'sqrt' (the actual default for RandomForestClassifier) so it can
+    be swept without ambiguity about what the "default" being compared
+    against actually was.
+    """
     clf = RandomForestClassifier(
-        n_estimators=300, max_depth=None, class_weight="balanced", random_state=42, n_jobs=-1
+        n_estimators=n_estimators, max_depth=max_depth, max_features=max_features,
+        min_samples_split=min_samples_split, min_samples_leaf=min_samples_leaf,
+        class_weight="balanced", random_state=random_state, n_jobs=-1,
     )
     clf.fit(features, labels)
     return clf
