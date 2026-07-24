@@ -68,10 +68,26 @@ def extract_band_power_features(
     theta/beta ratio, from an mne.Epochs object (or a np.ndarray of shape
     (n_epochs, n_channels, n_samples)).
 
-    Returns a np.ndarray (n_epochs, n_channels * n_bands + 1).
+    channels: FIXED this session -- was declared but never actually
+    used (a real bug: epochs.get_data() was always called with no
+    picks, silently including whatever channels happen to be in the
+    Epochs object, e.g. extra EOG/reference channels beyond the intended
+    EEG montage -- this caused a real shape mismatch when this function
+    was reused for the lightweight TCN architecture's fusion classifier,
+    since the caller's raw-epoch tensor and this function's feature
+    vector could silently disagree on channel count). Now passed to
+    epochs.get_data(picks=channels) when epochs is an mne.Epochs object
+    and channels is not None, guaranteeing the same channel set the
+    caller explicitly asked for. Has no effect when epochs is already a
+    plain numpy array (picks doesn't apply there -- pre-select channels
+    yourself before calling in that case).
+
+    Returns a np.ndarray (n_epochs, n_channels * n_bands + 1), where
+    n_channels reflects `channels` if given, else whatever the Epochs
+    object (or input array) itself contains.
     """
     if hasattr(epochs, "get_data"):
-        data = epochs.get_data()
+        data = epochs.get_data(picks=channels) if channels is not None else epochs.get_data()
         sfreq = epochs.info["sfreq"]
     else:
         data = epochs

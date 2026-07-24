@@ -73,7 +73,7 @@ def build_subject_dataset_lightweight(
     epochs = epoch_by_flag_events(raw_clean, sample_indices, flag_types)
 
     epoch_data_all = epochs.get_data(picks=CGX_CHANNELS)  # (n_epochs, n_channels, n_timepoints)
-    band_power_feats = extract_band_power_features(epochs)  # (n_epochs, n_features)
+    band_power_feats = extract_band_power_features(epochs, channels=CGX_CHANNELS)  # (n_epochs, n_features)
 
     dataset = []
     for i in range(len(epochs)):
