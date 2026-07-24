@@ -139,3 +139,10 @@ def pretrain_autoencoder(
         history.append(epoch_loss / n_batches)
 
     return history
+
+
+def count_parameters(model: nn.Module) -> int:
+    """Total trainable parameter count -- for the paper's efficiency
+    comparison table alongside the other lightweight architectures
+    tested this session (TCN: 816/6002 params, EEGNet: 2162 params)."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
