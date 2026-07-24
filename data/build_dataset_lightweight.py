@@ -36,8 +36,9 @@ def build_subject_dataset_lightweight(
     cgx_path: str,
     flags_path: str,
     level: str,
+    skip_ica: bool = False,
 ) -> List[Tuple[torch.Tensor, np.ndarray]]:
-    """Runs preprocessing (load -> filter -> ICA -> epoch) identically
+    """Runs preprocessing (load -> filter -> [ICA] -> epoch) identically
     to build_dataset.py, but stops there -- no CQT, no per-epoch
     connectivity computation. Returns a list of (raw_epoch_tensor,
     band_power_features), one per kept epoch:
@@ -50,6 +51,20 @@ def build_subject_dataset_lightweight(
         as an explicit, near-zero-cost auxiliary signal fused with the
         TCN's learned representation rather than discarded.
 
+    skip_ica: NEW this session -- tests the hypothesis that ICA-based
+    artifact removal may be stripping genuine, frontally-weighted
+    ADHD-relevant signal along with real ocular artifacts. The CGX path
+    uses real ExG channels as an EOG reference (not the frontal-
+    correlation heuristic used for Emotiv), but ica.py's own docstring
+    flags the ExG->EOG electrode-placement assumption as unconfirmed,
+    and repeated "unstable mixing matrix estimation" warnings were
+    observed during preprocessing this session -- both plausible
+    mechanisms by which this step could remove real signal rather than
+    only artifacts. When True, ICA is skipped entirely (only
+    bandpass/notch filtering is applied) -- compare RF/EEGNet
+    performance with and without this flag to test the hypothesis
+    directly rather than assuming either answer.
+
     level: same convention as build_dataset.py's build_subject_dataset
     (e.g. 'Level1') -- pass the confirmed level explicitly. Flag-file
     parsing here matches build_dataset.py's own inline logic exactly
@@ -59,7 +74,10 @@ def build_subject_dataset_lightweight(
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
-    raw_clean, _ = run_ica_artifact_removal(raw_filt)
+    if skip_ica:
+        raw_clean = raw_filt
+    else:
+        raw_clean, _ = run_ica_artifact_removal(raw_filt)
 
     with open(flags_path) as f:
         flags_info = json.load(f)["slackline_levels_flags_info"]
