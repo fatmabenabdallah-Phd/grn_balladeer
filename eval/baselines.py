@@ -88,7 +88,12 @@ def extract_band_power_features(
             freqs, psd = welch(data[ep, ch, :], fs=sfreq, nperseg=min(256, data.shape[-1]))
             for b_idx, (band_name, (lo, hi)) in enumerate(EEG_BANDS.items()):
                 mask = (freqs >= lo) & (freqs <= hi)
-                band_power = np.trapz(psd[mask], freqs[mask]) if mask.any() else 0.0
+                # np.trapz was removed in NumPy 2.0+ (renamed np.trapezoid) --
+                # use getattr to support both old and new NumPy versions rather
+                # than assuming which one is installed (Colab vs. other envs
+                # may differ).
+                trapz_fn = getattr(np, "trapezoid", None) or np.trapz
+                band_power = trapz_fn(psd[mask], freqs[mask]) if mask.any() else 0.0
                 features[ep, ch * n_bands + b_idx] = band_power
                 if band_name == "theta":
                     theta_power_all[ep, ch] = band_power
