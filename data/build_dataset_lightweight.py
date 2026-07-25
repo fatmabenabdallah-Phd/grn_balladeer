@@ -44,12 +44,13 @@ def build_subject_dataset_lightweight(
     clean_bad_channels: bool = False,
     reject_epochs: bool = False,
     epoch_rejection_threshold: float = 150e-6,
+    common_average_reference: bool = False,
 ) -> List[Tuple[torch.Tensor, np.ndarray]]:
     """Runs preprocessing (load -> filter -> [bad-channel cleaning] ->
-    [ICA] -> epoch -> [epoch rejection]) identically to build_dataset.py,
-    but stops there -- no CQT, no per-epoch connectivity computation.
-    Returns a list of (raw_epoch_tensor, band_power_features), one per
-    KEPT epoch:
+    [re-reference] -> [ICA] -> epoch -> [epoch rejection]) identically
+    to build_dataset.py, but stops there -- no CQT, no per-epoch
+    connectivity computation. Returns a list of (raw_epoch_tensor,
+    band_power_features), one per KEPT epoch:
       - raw_epoch_tensor: (n_channels, n_timepoints) real-valued torch
         tensor, fed directly to LightweightTCNEncoder.
       - band_power_features: (n_features,) numpy array from
@@ -68,13 +69,23 @@ def build_subject_dataset_lightweight(
     discovery that the ExG reference channels were silently dead
     throughout this project.
 
-    reject_epochs: NEW this session -- drops individual epochs whose
-    peak-to-peak amplitude (any channel) exceeds
-    epoch_rejection_threshold (preprocessing.epoch_rejection), a
-    standard EEG QC step never previously implemented on BALLADEER.
-    Complements clean_bad_channels: a channel can be consistently bad
-    across a whole recording (handled there), while an epoch can be
-    transiently corrupted on an otherwise-good channel (handled here).
+    reject_epochs: drops individual epochs whose peak-to-peak amplitude
+    (any channel) exceeds epoch_rejection_threshold
+    (preprocessing.epoch_rejection), a standard EEG QC step never
+    previously implemented on BALLADEER. Complements clean_bad_channels:
+    a channel can be consistently bad across a whole recording (handled
+    there), while an epoch can be transiently corrupted on an
+    otherwise-good channel (handled here).
+
+    common_average_reference: NEW this session -- re-references EEG
+    channels to the common average (mean signal across all EEG
+    channels subtracted from each channel at each timepoint), MNE's
+    built-in set_eeg_reference('average'). Applied AFTER bad-channel
+    cleaning (if enabled) so a genuinely bad channel does not corrupt
+    the average it contributes to, and BEFORE ICA (standard order --
+    ICA benefits from a consistent, zero-mean-across-channels
+    reference). A standard EEG preprocessing step never previously
+    tried on BALLADEER.
 
     level: same convention as build_dataset.py's build_subject_dataset
     (e.g. 'Level1') -- pass the confirmed level explicitly. Flag-file
@@ -90,6 +101,9 @@ def build_subject_dataset_lightweight(
         set_standard_montage(raw_filt, CGX_CHANNELS)
         report = detect_bad_channels(raw_filt, CGX_CHANNELS)
         interpolate_bad_channels(raw_filt, report["bad_channels"], CGX_CHANNELS)
+
+    if common_average_reference:
+        raw_filt.set_eeg_reference("average", ch_type="eeg", verbose=False)
 
     if skip_ica:
         raw_clean = raw_filt
