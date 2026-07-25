@@ -25,6 +25,7 @@ from typing import List, Tuple
 import numpy as np
 import torch
 
+import mne
 from grn_balladeer.preprocessing.mne_loading import load_eeg_cgx, CGX_CHANNELS
 from grn_balladeer.preprocessing.filtering import apply_standard_filters
 from grn_balladeer.preprocessing.ica import run_ica_artifact_removal
@@ -45,12 +46,13 @@ def build_subject_dataset_lightweight(
     reject_epochs: bool = False,
     epoch_rejection_threshold: float = 150e-6,
     common_average_reference: bool = False,
+    surface_laplacian: bool = False,
 ) -> List[Tuple[torch.Tensor, np.ndarray]]:
     """Runs preprocessing (load -> filter -> [bad-channel cleaning] ->
-    [re-reference] -> [ICA] -> epoch -> [epoch rejection]) identically
-    to build_dataset.py, but stops there -- no CQT, no per-epoch
-    connectivity computation. Returns a list of (raw_epoch_tensor,
-    band_power_features), one per KEPT epoch:
+    [re-reference/CSD] -> [ICA] -> epoch -> [epoch rejection])
+    identically to build_dataset.py, but stops there -- no CQT, no
+    per-epoch connectivity computation. Returns a list of
+    (raw_epoch_tensor, band_power_features), one per KEPT epoch:
       - raw_epoch_tensor: (n_channels, n_timepoints) real-valued torch
         tensor, fed directly to LightweightTCNEncoder.
       - band_power_features: (n_features,) numpy array from
@@ -77,15 +79,26 @@ def build_subject_dataset_lightweight(
     there), while an epoch can be transiently corrupted on an
     otherwise-good channel (handled here).
 
-    common_average_reference: NEW this session -- re-references EEG
-    channels to the common average (mean signal across all EEG
-    channels subtracted from each channel at each timepoint), MNE's
-    built-in set_eeg_reference('average'). Applied AFTER bad-channel
-    cleaning (if enabled) so a genuinely bad channel does not corrupt
-    the average it contributes to, and BEFORE ICA (standard order --
-    ICA benefits from a consistent, zero-mean-across-channels
-    reference). A standard EEG preprocessing step never previously
-    tried on BALLADEER.
+    common_average_reference: re-references EEG channels to the common
+    average, MNE's built-in set_eeg_reference('average'). Applied AFTER
+    bad-channel cleaning (if enabled) so a genuinely bad channel does
+    not corrupt the average it contributes to, and BEFORE ICA.
+
+    surface_laplacian: NEW this session -- applies surface Laplacian /
+    Current Source Density re-referencing (MNE's built-in
+    compute_current_source_density()), a spatial filter that sharpens
+    localization by emphasizing local, radially-oriented sources over
+    volume-conducted signal shared across the scalp -- motivated by the
+    hypothesis that this might sharpen the frontal theta/beta signal
+    ADHD's biomarker literature focuses on. Requires electrode
+    positions (uses the same standard_1020 montage as
+    clean_bad_channels/connectivity.structural_graph). Mutually
+    exclusive with common_average_reference in practice: CSD is itself
+    a reference-free spatial transform, and applying both is redundant
+    rather than complementary -- if both are requested, CSD is applied
+    and common_average_reference is skipped with a note in this
+    docstring (not a runtime warning, since this is a deliberate,
+    documented design choice, not an error condition).
 
     level: same convention as build_dataset.py's build_subject_dataset
     (e.g. 'Level1') -- pass the confirmed level explicitly. Flag-file
@@ -102,7 +115,11 @@ def build_subject_dataset_lightweight(
         report = detect_bad_channels(raw_filt, CGX_CHANNELS)
         interpolate_bad_channels(raw_filt, report["bad_channels"], CGX_CHANNELS)
 
-    if common_average_reference:
+    if surface_laplacian:
+        if not clean_bad_channels:  # montage not yet attached in that branch
+            set_standard_montage(raw_filt, CGX_CHANNELS)
+        raw_filt = mne.preprocessing.compute_current_source_density(raw_filt, verbose=False)
+    elif common_average_reference:
         raw_filt.set_eeg_reference("average", ch_type="eeg", verbose=False)
 
     if skip_ica:
