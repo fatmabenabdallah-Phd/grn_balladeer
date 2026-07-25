@@ -44,6 +44,22 @@ def _fallback_frontal_proxy(raw: mne.io.Raw) -> Optional[np.ndarray]:
     return data.mean(axis=0)
 
 
+def _is_dead_reference(raw: mne.io.Raw, ch_names: List[str], std_threshold: float = 1e-10) -> bool:
+    """Checks whether the given channel(s) are effectively flat
+    (std below std_threshold) -- i.e. a dead/non-functional reference,
+    not a genuine signal. Discovered this session: CGX's ExG channels
+    (typed 'eog' via load_eeg_cgx(include_exg_as_eog=True)) are flat on
+    every subject checked, meaning find_bads_eog() against them never
+    excludes anything -- ICA-based artifact removal was silently
+    inactive throughout this project as a result. Returns True if ALL
+    given channels are flat (a partial reference, e.g. one working EOG
+    channel out of two, is still usable and should not trigger the
+    fallback).
+    """
+    data = raw.get_data(picks=ch_names)
+    return bool(np.all(data.std(axis=1) < std_threshold))
+
+
 def run_ica_artifact_removal(
     raw: mne.io.Raw,
     n_components: int = 15,
@@ -53,10 +69,20 @@ def run_ica_artifact_removal(
     """Fits ICA (FastICA) and removes blink/artifact components, then
     returns (cleaned_raw_copy, report_dict) — original `raw` untouched.
 
-    - If `raw` contains channel(s) of type 'eog', uses MNE's standard
-      ica.find_bads_eog() against them (preferred path).
-    - Otherwise, falls back to a frontal-channel-average proxy and flags
-      any component with |correlation| > corr_threshold against it
+    - If `raw` contains channel(s) of type 'eog' AND they carry a real
+      (non-flat) signal, uses MNE's standard ica.find_bads_eog()
+      against them (preferred path).
+    - NEW this session: if the 'eog'-typed channels are flat (a dead
+      reference -- see _is_dead_reference, discovered via CGX's ExG
+      channels being silently non-functional on every subject checked),
+      automatically falls back to the frontal-channel-average proxy
+      heuristic instead of trusting a reference known not to carry a
+      real signal. This is what actually activates artifact removal on
+      CGX for the first time in this project; previously the 'eog' type
+      alone was enough to take the (broken) preferred path.
+    - Otherwise (no 'eog'-typed channel at all, e.g. Emotiv), falls back
+      to the same frontal-channel-average proxy directly, and flags any
+      component with |correlation| > corr_threshold against it
       (heuristic — document this choice explicitly if used in the paper).
     """
     raw_for_ica = raw.copy()
@@ -68,24 +94,30 @@ def run_ica_artifact_removal(
     ica.fit(raw_for_ica, verbose=False)
 
     eog_ch_names = [ch for ch, kind in zip(raw.ch_names, raw.get_channel_types()) if kind == "eog"]
+    eog_is_dead = bool(eog_ch_names) and _is_dead_reference(raw_for_ica, eog_ch_names)
 
-    if eog_ch_names:
+    if eog_ch_names and not eog_is_dead:
         bad_idx, scores = ica.find_bads_eog(raw_for_ica, ch_name=eog_ch_names, verbose=False)
         method_used = f"find_bads_eog against {eog_ch_names}"
     else:
         proxy = _fallback_frontal_proxy(raw_for_ica)
         if proxy is None:
-            # No EOG channel and no frontal proxy available — return
+            # No usable EOG channel and no frontal proxy available — return
             # unchanged rather than silently skipping artifact removal
             # without any signal to base it on.
             raise ValueError(
-                "No EOG channel and no frontal fallback channel available for "
+                "No usable EOG channel and no frontal fallback channel available for "
                 "ICA artifact detection — check device channel list."
             )
         sources = ica.get_sources(raw_for_ica).get_data()
         corrs = np.array([np.corrcoef(s, proxy)[0, 1] for s in sources])
         bad_idx = np.where(np.abs(corrs) > corr_threshold)[0].tolist()
-        method_used = f"frontal-proxy correlation (threshold={corr_threshold})"
+        method_used = (
+            f"frontal-proxy correlation (threshold={corr_threshold}), "
+            f"triggered by dead EOG reference {eog_ch_names}"
+            if eog_is_dead
+            else f"frontal-proxy correlation (threshold={corr_threshold})"
+        )
 
     ica.exclude = bad_idx
     raw_clean = raw.copy()
@@ -96,5 +128,6 @@ def run_ica_artifact_removal(
         "n_excluded": len(bad_idx),
         "excluded_indices": bad_idx,
         "method": method_used,
+        "eog_reference_was_dead": eog_is_dead,
     }
     return raw_clean, ica_report
