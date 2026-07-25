@@ -32,6 +32,7 @@ from grn_balladeer.preprocessing.epoching import flags_to_samples, epoch_by_flag
 from grn_balladeer.preprocessing.bad_channels import (
     set_standard_montage, detect_bad_channels, interpolate_bad_channels,
 )
+from grn_balladeer.preprocessing.epoch_rejection import reject_bad_epochs
 from grn_balladeer.eval.baselines import extract_band_power_features
 
 
@@ -41,11 +42,14 @@ def build_subject_dataset_lightweight(
     level: str,
     skip_ica: bool = False,
     clean_bad_channels: bool = False,
+    reject_epochs: bool = False,
+    epoch_rejection_threshold: float = 150e-6,
 ) -> List[Tuple[torch.Tensor, np.ndarray]]:
     """Runs preprocessing (load -> filter -> [bad-channel cleaning] ->
-    [ICA] -> epoch) identically to build_dataset.py, but stops there --
-    no CQT, no per-epoch connectivity computation. Returns a list of
-    (raw_epoch_tensor, band_power_features), one per kept epoch:
+    [ICA] -> epoch -> [epoch rejection]) identically to build_dataset.py,
+    but stops there -- no CQT, no per-epoch connectivity computation.
+    Returns a list of (raw_epoch_tensor, band_power_features), one per
+    KEPT epoch:
       - raw_epoch_tensor: (n_channels, n_timepoints) real-valued torch
         tensor, fed directly to LightweightTCNEncoder.
       - band_power_features: (n_features,) numpy array from
@@ -57,17 +61,20 @@ def build_subject_dataset_lightweight(
 
     skip_ica: tests the hypothesis that ICA-based artifact removal may
     be stripping genuine, frontally-weighted ADHD-relevant signal along
-    with real ocular artifacts. See prior session note: ICA turned out
-    to be silently inactive on every CGX subject checked (dead ExG
-    reference channels), so this flag alone does not change results.
+    with real ocular artifacts.
 
-    clean_bad_channels: NEW this session -- detects and interpolates
-    bad EEG channels (preprocessing.bad_channels: robust z-score on
-    log-variance, spherical-spline interpolation) before epoching.
-    Motivated directly by the discovery that the ExG reference channels
-    were silently dead throughout this project: if a reference channel
-    could fail undetected, ordinary EEG channels plausibly can too, and
-    this had never been checked before this session.
+    clean_bad_channels: detects and interpolates bad EEG channels
+    (preprocessing.bad_channels) before epoching. Motivated by the
+    discovery that the ExG reference channels were silently dead
+    throughout this project.
+
+    reject_epochs: NEW this session -- drops individual epochs whose
+    peak-to-peak amplitude (any channel) exceeds
+    epoch_rejection_threshold (preprocessing.epoch_rejection), a
+    standard EEG QC step never previously implemented on BALLADEER.
+    Complements clean_bad_channels: a channel can be consistently bad
+    across a whole recording (handled there), while an epoch can be
+    transiently corrupted on an otherwise-good channel (handled here).
 
     level: same convention as build_dataset.py's build_subject_dataset
     (e.g. 'Level1') -- pass the confirmed level explicitly. Flag-file
@@ -99,6 +106,9 @@ def build_subject_dataset_lightweight(
     sfreq = raw_clean.info["sfreq"]
     sample_indices, flag_types = flags_to_samples(level_flags, sfreq)
     epochs = epoch_by_flag_events(raw_clean, sample_indices, flag_types)
+
+    if reject_epochs:
+        epochs, _ = reject_bad_epochs(epochs, threshold=epoch_rejection_threshold)
 
     epoch_data_all = epochs.get_data(picks=CGX_CHANNELS)  # (n_epochs, n_channels, n_timepoints)
     band_power_feats = extract_band_power_features(epochs, channels=CGX_CHANNELS)  # (n_epochs, n_features)
