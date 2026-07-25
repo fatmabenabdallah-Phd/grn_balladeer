@@ -29,6 +29,9 @@ from grn_balladeer.preprocessing.mne_loading import load_eeg_cgx, CGX_CHANNELS
 from grn_balladeer.preprocessing.filtering import apply_standard_filters
 from grn_balladeer.preprocessing.ica import run_ica_artifact_removal
 from grn_balladeer.preprocessing.epoching import flags_to_samples, epoch_by_flag_events
+from grn_balladeer.preprocessing.bad_channels import (
+    set_standard_montage, detect_bad_channels, interpolate_bad_channels,
+)
 from grn_balladeer.eval.baselines import extract_band_power_features
 
 
@@ -37,11 +40,12 @@ def build_subject_dataset_lightweight(
     flags_path: str,
     level: str,
     skip_ica: bool = False,
+    clean_bad_channels: bool = False,
 ) -> List[Tuple[torch.Tensor, np.ndarray]]:
-    """Runs preprocessing (load -> filter -> [ICA] -> epoch) identically
-    to build_dataset.py, but stops there -- no CQT, no per-epoch
-    connectivity computation. Returns a list of (raw_epoch_tensor,
-    band_power_features), one per kept epoch:
+    """Runs preprocessing (load -> filter -> [bad-channel cleaning] ->
+    [ICA] -> epoch) identically to build_dataset.py, but stops there --
+    no CQT, no per-epoch connectivity computation. Returns a list of
+    (raw_epoch_tensor, band_power_features), one per kept epoch:
       - raw_epoch_tensor: (n_channels, n_timepoints) real-valued torch
         tensor, fed directly to LightweightTCNEncoder.
       - band_power_features: (n_features,) numpy array from
@@ -51,19 +55,19 @@ def build_subject_dataset_lightweight(
         as an explicit, near-zero-cost auxiliary signal fused with the
         TCN's learned representation rather than discarded.
 
-    skip_ica: NEW this session -- tests the hypothesis that ICA-based
-    artifact removal may be stripping genuine, frontally-weighted
-    ADHD-relevant signal along with real ocular artifacts. The CGX path
-    uses real ExG channels as an EOG reference (not the frontal-
-    correlation heuristic used for Emotiv), but ica.py's own docstring
-    flags the ExG->EOG electrode-placement assumption as unconfirmed,
-    and repeated "unstable mixing matrix estimation" warnings were
-    observed during preprocessing this session -- both plausible
-    mechanisms by which this step could remove real signal rather than
-    only artifacts. When True, ICA is skipped entirely (only
-    bandpass/notch filtering is applied) -- compare RF/EEGNet
-    performance with and without this flag to test the hypothesis
-    directly rather than assuming either answer.
+    skip_ica: tests the hypothesis that ICA-based artifact removal may
+    be stripping genuine, frontally-weighted ADHD-relevant signal along
+    with real ocular artifacts. See prior session note: ICA turned out
+    to be silently inactive on every CGX subject checked (dead ExG
+    reference channels), so this flag alone does not change results.
+
+    clean_bad_channels: NEW this session -- detects and interpolates
+    bad EEG channels (preprocessing.bad_channels: robust z-score on
+    log-variance, spherical-spline interpolation) before epoching.
+    Motivated directly by the discovery that the ExG reference channels
+    were silently dead throughout this project: if a reference channel
+    could fail undetected, ordinary EEG channels plausibly can too, and
+    this had never been checked before this session.
 
     level: same convention as build_dataset.py's build_subject_dataset
     (e.g. 'Level1') -- pass the confirmed level explicitly. Flag-file
@@ -74,6 +78,12 @@ def build_subject_dataset_lightweight(
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
+
+    if clean_bad_channels:
+        set_standard_montage(raw_filt, CGX_CHANNELS)
+        report = detect_bad_channels(raw_filt, CGX_CHANNELS)
+        interpolate_bad_channels(raw_filt, report["bad_channels"], CGX_CHANNELS)
+
     if skip_ica:
         raw_clean = raw_filt
     else:
