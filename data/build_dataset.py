@@ -53,6 +53,7 @@ def build_subject_dataset(
     return_epochs: bool = False,
     connectivity_metric: str = "plv",
     clean_bad_channels: bool = False,
+    exclude_bad_channels: bool = False,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Runs the full Module 2b -> 3 -> 4 chain on one subject's real CGX
     file and returns a list of (X_i, L_norm_i) graphs, one per epoch
@@ -120,14 +121,42 @@ def build_subject_dataset(
     channels BEFORE the graph is constructed (not just before
     band-power features are computed) should matter specifically for
     GRN, in a way it did not for the classical baselines.
+
+    exclude_bad_channels: NEW this session -- mutually exclusive with
+    clean_bad_channels. Instead of interpolating detected bad channels
+    (which reconstructs each one as a linear combination of its clean
+    neighbors, potentially inflating PLV between them with spurious,
+    non-physiological synchrony), this option DROPS them entirely from
+    the channel set used to build the graph -- fewer nodes, no
+    fabricated connectivity. Motivated by an unexpected finding: on
+    BALLADEER, interpolation-based cleaning made GRN's performance
+    WORSE (MEAN AUC 0.440 vs. 0.517 uncleaned), the opposite of what
+    the noise-propagation hypothesis predicted -- suggesting
+    interpolation itself, not just leftover channel noise, may be the
+    problem. Note the resulting graph has fewer than 30 nodes for
+    subjects with any detected bad channels, and this count can vary
+    by subject; GRNEncoder and downstream code handle variable node
+    counts natively (no fixed-size assumption), but any code comparing
+    node-level outputs across subjects should account for this.
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
 
-    if clean_bad_channels:
+    active_channels = list(CGX_CHANNELS)
+
+    if clean_bad_channels or exclude_bad_channels:
         set_standard_montage(raw_filt, CGX_CHANNELS)
         bad_channel_report = detect_bad_channels(raw_filt, CGX_CHANNELS)
-        interpolate_bad_channels(raw_filt, bad_channel_report["bad_channels"], CGX_CHANNELS)
+        if clean_bad_channels:
+            interpolate_bad_channels(raw_filt, bad_channel_report["bad_channels"], CGX_CHANNELS)
+        elif exclude_bad_channels:
+            active_channels = [ch for ch in CGX_CHANNELS if ch not in bad_channel_report["bad_channels"]]
+            if len(active_channels) < 2:
+                raise ValueError(
+                    f"build_subject_dataset: exclude_bad_channels left only "
+                    f"{len(active_channels)} channels -- too few to form a graph "
+                    f"(bad_channels={bad_channel_report['bad_channels']})."
+                )
 
     raw_clean, ica_report = run_ica_artifact_removal(raw_filt)
 
@@ -142,7 +171,7 @@ def build_subject_dataset(
     sample_indices, flag_types = flags_to_samples(level_flags, sfreq)
     epochs = epoch_by_flag_events(raw_clean, sample_indices, flag_types)
 
-    data_continuous = raw_clean.get_data(picks=CGX_CHANNELS)
+    data_continuous = raw_clean.get_data(picks=active_channels)
     data_continuous_t = torch.from_numpy(data_continuous).float()
     cqt_per_channel = [
         compute_cqt_features(data_continuous_t[ci], sfreq=sfreq, hop_length=hop_length)
@@ -150,7 +179,7 @@ def build_subject_dataset(
     ]
 
     kept_events = epochs.events
-    epoch_data_all = epochs.get_data(picks=CGX_CHANNELS)
+    epoch_data_all = epochs.get_data(picks=active_channels)
 
     dataset: List[Tuple[torch.Tensor, torch.Tensor]] = []
     for i in range(len(epochs)):
@@ -158,7 +187,7 @@ def build_subject_dataset(
 
         per_channel_pooled = [
             pool_cqt_to_node_features(cqt_per_channel[ci], event_sample_idx, sfreq, hop_length)
-            for ci in range(len(CGX_CHANNELS))
+            for ci in range(len(active_channels))
         ]
         X_i = build_node_feature_matrix(per_channel_pooled)
 
