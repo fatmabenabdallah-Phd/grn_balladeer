@@ -28,6 +28,9 @@ from grn_balladeer.preprocessing.mne_loading import load_eeg_cgx, CGX_CHANNELS
 from grn_balladeer.preprocessing.filtering import apply_standard_filters
 from grn_balladeer.preprocessing.ica import run_ica_artifact_removal
 from grn_balladeer.preprocessing.epoching import flags_to_samples, epoch_by_flag_events
+from grn_balladeer.preprocessing.bad_channels import (
+    set_standard_montage, detect_bad_channels, interpolate_bad_channels,
+)
 from grn_balladeer.connectivity.phase_connectivity import (
     extract_band_signal,
     compute_instantaneous_phase,
@@ -49,6 +52,7 @@ def build_subject_dataset(
     hop_length: int = 32,
     return_epochs: bool = False,
     connectivity_metric: str = "plv",
+    clean_bad_channels: bool = False,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Runs the full Module 2b -> 3 -> 4 chain on one subject's real CGX
     file and returns a list of (X_i, L_norm_i) graphs, one per epoch
@@ -101,9 +105,30 @@ def build_subject_dataset(
     into the complex edge weights is computed identically either way,
     since PLI itself has no natural phase-difference counterpart (it
     discards phase sign by construction).
+
+    clean_bad_channels: NEW this session -- detects and interpolates
+    bad EEG channels (preprocessing.bad_channels) BEFORE the PLV/PLI
+    connectivity graph and magnetic Laplacian are built, rather than
+    only at the band-power-feature stage (as in
+    build_dataset_lightweight.py). This is the definitive test of a
+    hypothesis raised by GRN's own cross-dataset validation
+    (Section~\ref{sec:discussion} of the manuscript): GRN's fixed
+    connectivity graph may propagate a corrupted channel's noise to
+    every node connected to it via the magnetic-Laplacian convolution,
+    a failure mode channel-independent architectures (Random Forest,
+    TCN alone) do not share. If this hypothesis is correct, cleaning
+    channels BEFORE the graph is constructed (not just before
+    band-power features are computed) should matter specifically for
+    GRN, in a way it did not for the classical baselines.
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
+
+    if clean_bad_channels:
+        set_standard_montage(raw_filt, CGX_CHANNELS)
+        bad_channel_report = detect_bad_channels(raw_filt, CGX_CHANNELS)
+        interpolate_bad_channels(raw_filt, bad_channel_report["bad_channels"], CGX_CHANNELS)
+
     raw_clean, ica_report = run_ica_artifact_removal(raw_filt)
 
     with open(flags_path) as f:
