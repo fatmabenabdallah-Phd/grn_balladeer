@@ -54,6 +54,7 @@ def build_subject_dataset(
     connectivity_metric: str = "plv",
     clean_bad_channels: bool = False,
     exclude_bad_channels: bool = False,
+    fixed_exclude_channels: "List[str] | None" = None,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Runs the full Module 2b -> 3 -> 4 chain on one subject's real CGX
     file and returns a list of (X_i, L_norm_i) graphs, one per epoch
@@ -133,18 +134,45 @@ def build_subject_dataset(
     WORSE (MEAN AUC 0.440 vs. 0.517 uncleaned), the opposite of what
     the noise-propagation hypothesis predicted -- suggesting
     interpolation itself, not just leftover channel noise, may be the
-    problem. Note the resulting graph has fewer than 30 nodes for
-    subjects with any detected bad channels, and this count can vary
-    by subject; GRNEncoder and downstream code handle variable node
-    counts natively (no fixed-size assumption), but any code comparing
-    node-level outputs across subjects should account for this.
+    problem.
+
+    CORRECTION vs. an earlier draft of this docstring: per-subject
+    adaptive exclusion (detecting and dropping whichever channels are
+    bad for THAT subject) produces a DIFFERENT number of graph nodes
+    per subject (confirmed empirically: 19-30 nodes across the cohort,
+    mean 27), which breaks training.cross_validation.train_fold's
+    batched tensor stacking (torch.stack requires uniform shape across
+    the whole training/validation batch) -- GRNEncoder itself tolerates
+    variable node counts when called on one subject at a time, but the
+    shared training loop does not. Use fixed_exclude_channels (below)
+    for anything going through train_fold.
+
+    fixed_exclude_channels: a fixed list of channel names (e.g. the
+    dataset-wide top bad channels already characterized this session --
+    Fp1, Fp2, Fpz, AF7, AF8, F7, CP6, Cz, A2, C4) to drop identically
+    for EVERY subject, regardless of that individual subject's own
+    detected bad channels. Guarantees uniform node count across the
+    cohort, compatible with train_fold. Takes precedence over
+    exclude_bad_channels's per-subject adaptive detection if both are
+    set; leave exclude_bad_channels=False when using this parameter.
+    Tests a related but distinct question from per-subject exclusion:
+    not "remove whichever channels are bad for this specific person"
+    but "does removing the channels known to be chronically
+    problematic across the cohort, uniformly, help GRN."
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
 
     active_channels = list(CGX_CHANNELS)
 
-    if clean_bad_channels or exclude_bad_channels:
+    if fixed_exclude_channels:
+        active_channels = [ch for ch in CGX_CHANNELS if ch not in fixed_exclude_channels]
+        if len(active_channels) < 2:
+            raise ValueError(
+                f"build_subject_dataset: fixed_exclude_channels left only "
+                f"{len(active_channels)} channels -- too few to form a graph."
+            )
+    elif clean_bad_channels or exclude_bad_channels:
         set_standard_montage(raw_filt, CGX_CHANNELS)
         bad_channel_report = detect_bad_channels(raw_filt, CGX_CHANNELS)
         if clean_bad_channels:
