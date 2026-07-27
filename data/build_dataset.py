@@ -55,6 +55,7 @@ def build_subject_dataset(
     clean_bad_channels: bool = False,
     exclude_bad_channels: bool = False,
     fixed_exclude_channels: "List[str] | None" = None,
+    frozen_connectivity: bool = False,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Runs the full Module 2b -> 3 -> 4 chain on one subject's real CGX
     file and returns a list of (X_i, L_norm_i) graphs, one per epoch
@@ -159,6 +160,24 @@ def build_subject_dataset(
     not "remove whichever channels are bad for this specific person"
     but "does removing the channels known to be chronically
     problematic across the cohort, uniformly, help GRN."
+
+    frozen_connectivity: NEW this session -- by default (False), PLV/PLI
+    connectivity (and the resulting magnetic Laplacian) is recomputed
+    FRESH for every single epoch, inside the per-epoch loop below --
+    this is a real, recurring computational cost at inference time, not
+    a one-time calibration step, contrary to an intuitive but incorrect
+    reading of "fixed connectivity" as "computed once when the headset
+    is fitted." When frozen_connectivity=True, connectivity is instead
+    computed ONCE from the subject's full continuous recording (a
+    calibration-like single connectivity graph), and this SAME Laplacian
+    is reused for every epoch -- only the CQT node features (X_i) still
+    vary per epoch, not the graph structure (L_norm). This tests
+    whether GRN's per-epoch dynamic connectivity (potentially reflecting
+    moment-to-moment attention fluctuations relevant to ADHD) is
+    actually necessary for its performance, or whether a single frozen
+    connectivity graph -- computationally far cheaper for continuous
+    edge deployment, since PLV would then be an upfront cost rather than
+    a recurring one -- performs comparably.
     """
     raw = load_eeg_cgx(cgx_path)
     raw_filt = apply_standard_filters(raw)
@@ -209,6 +228,36 @@ def build_subject_dataset(
     kept_events = epochs.events
     epoch_data_all = epochs.get_data(picks=active_channels)
 
+    if connectivity_metric == "plv":
+        strength_fn = compute_plv_matrix
+    elif connectivity_metric == "pli":
+        strength_fn = compute_pli_matrix
+    else:
+        raise ValueError(f"connectivity_metric must be 'plv' or 'pli', got '{connectivity_metric}'")
+
+    def _compute_laplacian(signal_segment: np.ndarray) -> torch.Tensor:
+        """Computes one (X-independent) magnetic Laplacian from a signal
+        segment -- factored out so both the per-epoch (default) and
+        frozen (computed once) paths share identical logic."""
+        W_per_band = []
+        strength_per_band = []
+        for band in bands:
+            band_signal = extract_band_signal(signal_segment, band, sfreq)
+            phases = compute_instantaneous_phase(band_signal)
+            strength_band = strength_fn(phases)
+            phase_diff_band = compute_mean_phase_diff(phases)
+            W_per_band.append(build_complex_edge_weights(strength_band, phase_diff_band))
+            strength_per_band.append(strength_band)
+        W = np.mean(W_per_band, axis=0)
+        strength = np.mean(strength_per_band, axis=0)
+        L_C = build_magnetic_laplacian(W, strength)
+        return compute_normalized_laplacian(torch.from_numpy(L_C).to(torch.complex64))
+
+    # frozen_connectivity: compute ONE Laplacian from the full continuous
+    # recording, reused for every epoch below -- a single calibration-like
+    # cost instead of a per-epoch recurring one (see docstring above).
+    frozen_L_norm = _compute_laplacian(data_continuous) if frozen_connectivity else None
+
     dataset: List[Tuple[torch.Tensor, torch.Tensor]] = []
     for i in range(len(epochs)):
         event_sample_idx = int(kept_events[i, 0])
@@ -219,39 +268,11 @@ def build_subject_dataset(
         ]
         X_i = build_node_feature_matrix(per_channel_pooled)
 
-        epoch_signal = epoch_data_all[i]
-
-        # NEW this session: average connectivity across all requested bands
-        # (default theta+alpha+beta) into ONE combined adjacency, rather than
-        # using a single band (alpha only, as before) -- see this function's
-        # docstring for why this matters given L_harm/L_symb's cross-frequency
-        # theoretical grounding. The strength matrix (PLV or PLI, per
-        # connectivity_metric) is also averaged across bands (not just W)
-        # since build_magnetic_laplacian needs a real-valued magnitude
-        # matrix alongside the complex W, and averaging each band's own
-        # valid strength values (each in [0,1] for both PLV and PLI) keeps
-        # that property, unlike e.g. re-deriving it from the averaged W.
-        if connectivity_metric == "plv":
-            strength_fn = compute_plv_matrix
-        elif connectivity_metric == "pli":
-            strength_fn = compute_pli_matrix
+        if frozen_connectivity:
+            L_norm_i = frozen_L_norm
         else:
-            raise ValueError(f"connectivity_metric must be 'plv' or 'pli', got '{connectivity_metric}'")
-
-        W_per_band = []
-        strength_per_band = []
-        for band in bands:
-            band_signal = extract_band_signal(epoch_signal, band, sfreq)
-            phases = compute_instantaneous_phase(band_signal)
-            strength_band = strength_fn(phases)
-            phase_diff_band = compute_mean_phase_diff(phases)
-            W_per_band.append(build_complex_edge_weights(strength_band, phase_diff_band))
-            strength_per_band.append(strength_band)
-
-        W = np.mean(W_per_band, axis=0)
-        strength = np.mean(strength_per_band, axis=0)
-        L_C = build_magnetic_laplacian(W, strength)
-        L_norm_i = compute_normalized_laplacian(torch.from_numpy(L_C).to(torch.complex64))
+            epoch_signal = epoch_data_all[i]
+            L_norm_i = _compute_laplacian(epoch_signal)
 
         dataset.append((X_i, L_norm_i))
 

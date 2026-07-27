@@ -62,6 +62,7 @@ def build_subject_dataset_nasrabadi(
     bands: List[Tuple[float, float]] = ((4.0, 8.0), (8.0, 13.0), (13.0, 30.0)),
     hop_length: int = 32,
     connectivity_metric: str = "plv",
+    frozen_connectivity: bool = False,
 ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
     """Builds GRN-ready (X_i, L_norm_i) graphs from one subject's
     continuous Nasrabadi recording, one graph per non-overlapping
@@ -80,6 +81,17 @@ def build_subject_dataset_nasrabadi(
     defaults to build_dataset.py's build_subject_dataset, for the CGX/
     BALLADEER pipeline -- kept the same here so GRN's own architecture
     and hyperparameters are unchanged, only the epoching source differs.
+
+    frozen_connectivity: NEW this session -- by default (False),
+    PLV/PLI connectivity is recomputed fresh for every window, a real
+    recurring per-window cost, not a one-time calibration step. When
+    True, connectivity is computed ONCE from the subject's full
+    continuous recording and the same Laplacian is reused for every
+    window (only the CQT node features still vary per window). Tests
+    whether per-window dynamic connectivity is necessary for GRN's
+    performance or whether a single frozen graph -- computationally
+    far cheaper for continuous deployment -- performs comparably. See
+    build_dataset.py's identical parameter for the full rationale.
 
     Returns a list of (X_i, L_norm_i) graphs, one per window, in the
     exact same format GRN's training loop already expects.
@@ -111,6 +123,25 @@ def build_subject_dataset_nasrabadi(
     else:
         raise ValueError(f"connectivity_metric must be 'plv' or 'pli', got '{connectivity_metric}'")
 
+    def _compute_laplacian(signal_segment: np.ndarray) -> torch.Tensor:
+        """Factored out so both the per-window (default) and frozen
+        (computed once) paths share identical logic."""
+        W_per_band = []
+        strength_per_band = []
+        for band in bands:
+            band_signal = extract_band_signal(signal_segment, band, sfreq)
+            phases = compute_instantaneous_phase(band_signal)
+            strength_band = strength_fn(phases)
+            phase_diff_band = compute_mean_phase_diff(phases)
+            W_per_band.append(build_complex_edge_weights(strength_band, phase_diff_band))
+            strength_per_band.append(strength_band)
+        W = np.mean(W_per_band, axis=0)
+        strength = np.mean(strength_per_band, axis=0)
+        L_C = build_magnetic_laplacian(W, strength)
+        return compute_normalized_laplacian(torch.from_numpy(L_C).to(torch.complex64))
+
+    frozen_L_norm = _compute_laplacian(channel_data) if frozen_connectivity else None
+
     dataset: List[Tuple[torch.Tensor, torch.Tensor]] = []
     for w in range(n_windows):
         window_start_sample = w * window_samples
@@ -131,22 +162,11 @@ def build_subject_dataset_nasrabadi(
         ]
         X_i = build_node_feature_matrix(per_channel_pooled)
 
-        window_signal = channel_data[:, window_start_sample:window_start_sample + window_samples]
-
-        W_per_band = []
-        strength_per_band = []
-        for band in bands:
-            band_signal = extract_band_signal(window_signal, band, sfreq)
-            phases = compute_instantaneous_phase(band_signal)
-            strength_band = strength_fn(phases)
-            phase_diff_band = compute_mean_phase_diff(phases)
-            W_per_band.append(build_complex_edge_weights(strength_band, phase_diff_band))
-            strength_per_band.append(strength_band)
-
-        W = np.mean(W_per_band, axis=0)
-        strength = np.mean(strength_per_band, axis=0)
-        L_C = build_magnetic_laplacian(W, strength)
-        L_norm_i = compute_normalized_laplacian(torch.from_numpy(L_C).to(torch.complex64))
+        if frozen_connectivity:
+            L_norm_i = frozen_L_norm
+        else:
+            window_signal = channel_data[:, window_start_sample:window_start_sample + window_samples]
+            L_norm_i = _compute_laplacian(window_signal)
 
         dataset.append((X_i, L_norm_i))
 
