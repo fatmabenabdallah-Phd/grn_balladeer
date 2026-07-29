@@ -2,11 +2,11 @@
 grn_balladeer.preprocessing.epoch_rejection
 ===============================================
 Epoch-level amplitude rejection (peak-to-peak threshold) -- a standard
-EEG quality-control step never implemented anywhere in this pipeline
-before this session. Individual epochs containing a large-amplitude
-transient (movement, muscle burst, electrode pop) are rejected outright
-rather than averaged in, complementing (not replacing) the channel-
-level cleaning in preprocessing/bad_channels.py: a channel can be
+EEG quality-control step. Individual epochs containing a
+large-amplitude transient (movement, muscle burst, electrode pop) are
+rejected outright rather than averaged in, complementing (not
+replacing) the channel-level cleaning in preprocessing/bad_channels.py:
+a channel can be
 consistently bad across a whole recording (handled by bad_channels.py),
 while an epoch can be transiently corrupted on an otherwise-good
 channel (handled here).

@@ -14,9 +14,9 @@ direction, rationale), NOT silently converted into a loss term. The
 clinician must review and confirm (or correct) this structured
 proposal before it is ever used in training. This mirrors the standard
 this project already applies to itself: every citation added to
-references.bib this session was independently verified against a
-primary source before being trusted, not assumed correct from a first
-pass. A silently-accepted mistranslation of a clinical rule is a much
+references.bib was independently verified against a primary source
+before being trusted, not assumed correct from a first pass. A
+silently-accepted mistranslation of a clinical rule is a much
 higher-stakes failure mode than a wrong citation, so the same
 verify-before-trust discipline applies here, with a human in the loop
 instead of a second search.

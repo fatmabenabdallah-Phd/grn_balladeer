@@ -7,12 +7,12 @@ rule: anchor and positive MUST come from different subjects (same
 class, different subject). Without this rule, the easiest "positive"
 match is trivially the same subject's other epochs (shared EEG
 idiosyncrasies), which the triplet loss would then reinforce as if it
-were ADHD-relevant signal - literally the same subject-identity
-confound flagged repeatedly this session, but baked into the loss
-function instead of just the train/val split.
+were ADHD-relevant signal - the same subject-identity confound this
+project guards against elsewhere, but baked into the loss function
+instead of just the train/val split.
 
-First real test of this rule needed >= 2 subjects/class - available
-this session (UB0004, UB0022 = Control; UB0136, UB0023 = ADHD).
+This rule requires at least 2 subjects per class in any batch it is
+applied to.
 """
 
 from __future__ import annotations

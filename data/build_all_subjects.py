@@ -76,11 +76,11 @@ def build_all_subjects_datasets(
     as have a usable CGX+TAGS pair at SOME level, using resolve_subject_
     level's priority order.
 
-    checkpoint_dir: NEW this session -- if given, checks for an existing
-    checkpoint before calling build_subject_dataset, and saves a new one
-    after building. Uses the EXACT SAME filename convention as the
-    Colab driver's Stage 3 (real_dataset_{subject_id}_L{level}.pt), so
-    if this points at the same
+    checkpoint_dir: if given, checks for an existing checkpoint before
+    calling build_subject_dataset, and saves a new one after building.
+    Uses the EXACT SAME filename convention as the Colab driver's Stage
+    3 (real_dataset_{subject_id}_L{level}.pt), so if this points at the
+    same
     /content/drive/MyDrive/BALLADEER_GRN_checkpoints/datasets directory
     already used for the 114 Level1-only subjects, those are genuinely
     reloaded instantly rather than rebuilt -- this only matters for

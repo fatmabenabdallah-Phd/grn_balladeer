@@ -2,7 +2,7 @@
 grn_balladeer.model.eeg_autoencoder
 ======================================
 Self-supervised autoencoder for raw EEG epoch reconstruction. Motivated
-by this session's finding that four supervised deep architectures
+by the finding that four supervised deep architectures
 (GRN, lightweight TCN, TCN-only, EEGNet) all perform at chance on
 BALLADEER, while classical ML on hand-crafted band-power features
 reaches AUC~0.66-0.67: the hypothesis here is that SUPERVISED training
@@ -110,8 +110,7 @@ def pretrain_autoencoder(
     ONLY (must be training-fold subjects' epochs -- see module
     docstring on leakage discipline). Returns the per-epoch loss
     history (for a sanity-check reconstruction-loss curve, analogous to
-    the loss diagnostics used earlier this session for the supervised
-    models).
+    the loss diagnostics used for the supervised models).
     """
     if device is not None:
         autoencoder = autoencoder.to(device)
@@ -144,5 +143,5 @@ def pretrain_autoencoder(
 def count_parameters(model: nn.Module) -> int:
     """Total trainable parameter count -- for the paper's efficiency
     comparison table alongside the other lightweight architectures
-    tested this session (TCN: 816/6002 params, EEGNet: 2162 params)."""
+    tested (TCN: 816/6002 params, EEGNet: 2162 params)."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)

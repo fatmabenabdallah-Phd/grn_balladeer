@@ -4,27 +4,26 @@ grn_balladeer.data.epocx_features
 Loads Emotiv EPOCX recordings (BALLADEER session 1, AttentionRobotsDesktop
 task) and extracts band-power features for a Random Forest classifier,
 replacing an earlier N=35 cross-task validation result that could not
-be reconstructed or verified this session (no saved subject list or
-extraction code survived; re-deriving the filtering criterion from
-scratch consistently gave ~97-100 subjects at any reasonable threshold,
-not 35 -- rather than present an unverifiable number, this module
-rebuilds the analysis transparently from raw files).
+be reconstructed or verified (no saved subject list or extraction code
+survived; re-deriving the filtering criterion from scratch consistently
+gave ~97-100 subjects at any reasonable threshold, not 35 -- rather
+than present an unverifiable number, this module rebuilds the analysis
+transparently from raw files).
 
-File format (verified against a real subject's file this session):
-one CSV per subject, whose FIRST line is a metadata header (title,
-timestamps, headset info -- not column names) and whose SECOND line
-contains the real column headers (Timestamp, EEG.<channel>,
+File format: one CSV per subject, whose FIRST line is a metadata
+header (title, timestamps, headset info -- not column names) and whose
+SECOND line contains the real column headers (Timestamp, EEG.<channel>,
 CQ.<channel>, etc.). Must be loaded with skiprows=1, not as a normal
 CSV.
 
-Per-channel contact quality (CQ.<channel>) is on a 0-4 scale (verified
-this session: values observed are exactly {0,1,2,3,4}, not the 0-100
-scale CQ.Overall might suggest by name -- CQ.Overall was found to be a
-DIFFERENT, session-summary-like metric that rarely exceeds ~75 even in
-a good recording, and is NOT the per-channel quality signal to filter
-on). A subject/session is accepted if, for at least
-MIN_SESSION_QUALITY_FRACTION of the recording's samples, at least
-MIN_CHANNEL_QUALITY_FRACTION of the 14 channels have CQ >= MIN_CQ.
+Per-channel contact quality (CQ.<channel>) is on a 0-4 scale (values
+observed are exactly {0,1,2,3,4}, not the 0-100 scale CQ.Overall might
+suggest by name -- CQ.Overall is a DIFFERENT, recording-session-summary
+metric that rarely exceeds ~75 even in a good recording, and is NOT
+the per-channel quality signal to filter on). A subject/session is
+accepted if, for at least MIN_SESSION_QUALITY_FRACTION of the
+recording's samples, at least MIN_CHANNEL_QUALITY_FRACTION of the 14
+channels have CQ >= MIN_CQ.
 """
 
 from __future__ import annotations
@@ -62,8 +61,8 @@ EPOCX_FEATURE_NAMES = (
 
 def load_epocx_recording(csv_path: str) -> pd.DataFrame:
     """Loads one EPOCX CSV, correctly skipping the metadata header line
-    (verified this session: line 0 is metadata like 'title:UB0021,
-    start timestamp:...', real column headers are on line 1)."""
+    (line 0 is metadata like 'title:UB0021, start timestamp:...', real
+    column headers are on line 1)."""
     return pd.read_csv(csv_path, skiprows=1, low_memory=False)
 
 
@@ -71,7 +70,7 @@ def session_passes_quality_filter(eeg_df: pd.DataFrame) -> bool:
     """Checks whether a recording meets the quality bar: at
     MIN_SESSION_QUALITY_FRACTION of samples, at least
     MIN_CHANNEL_QUALITY_FRACTION of the 14 channels have per-channel
-    CQ >= MIN_CQ (verified 0-4 scale this session, not 0-100)."""
+    CQ >= MIN_CQ (0-4 scale, not 0-100)."""
     cq_cols = [f"CQ.{ch}" for ch in EPOCX_CHANNELS]
     if not all(c in eeg_df.columns for c in cq_cols):
         return False

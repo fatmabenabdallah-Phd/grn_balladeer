@@ -3,8 +3,8 @@ grn_balladeer.training.train_epoch_batched
 =============================================
 Vectorized replacement for train_epoch.py's per-sample Python loop.
 Verified numerically identical to the original (logits, l_task, l_harm,
-l_symb all matched to float rounding precision, see this session's test)
-before being introduced -- NOT a drop-in silent behavior change.
+l_symb all matched to float rounding precision) before being introduced
+-- NOT a drop-in silent behavior change.
 
 WHY THIS EXISTS: the original train_epoch() calls encoder(X_i, L_norm_i)
 once per sample inside a Python for-loop -- e.g. ~4600 separate small
@@ -19,10 +19,9 @@ sample, which is what actually uses the GPU's parallelism.
 REQUIRES: model.magnetic_laplacian_conv.MagneticLaplacianConv,
 model.classification_head.global_pool, losses.harmonic_loss.
 harmonic_loss, and losses.symbolic_loss.symbolic_implication_loss all
-updated this session to auto-detect and correctly handle a leading
-batch dimension (previously they would have silently indexed/pooled/
-broadcast over the wrong axis for batched input -- see each file's
-own docstring for the specific fix).
+auto-detect and correctly handle a leading batch dimension (each would
+otherwise silently index/pool/broadcast over the wrong axis for
+batched input -- see each file's own docstring for the specific fix).
 
 LIMITATION (inherited from the batching approach, not this file's own
 bug): every sample in the batch must have the SAME number of nodes
@@ -61,10 +60,10 @@ def train_epoch_batched(
     class_weights: "torch.Tensor | None" = None,
 ) -> dict:
     """Same loss semantics as train_epoch()/the original train_epoch_
-    batched -- CHANGED this session: takes already-stacked X_batch
-    (B,N,Cin) / L_batch (B,N,N) tensors directly, rather than a list of
-    (X_i, L_norm_i) tuples that got re-stacked via torch.stack INSIDE
-    this function on every single call.
+    batched -- takes already-stacked X_batch (B,N,Cin) / L_batch
+    (B,N,N) tensors directly, rather than a list of (X_i, L_norm_i)
+    tuples that got re-stacked via torch.stack INSIDE this function on
+    every single call.
 
     WHY THIS CHANGED: the training loop calls this function once per
     epoch (e.g. 60x for a 60-epoch fold). The original version re-ran

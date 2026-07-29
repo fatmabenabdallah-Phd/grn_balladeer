@@ -6,14 +6,14 @@ to combine task/harmonic/symbolic terms. Triplet term stays at its
 default 0.0 here (Module 7b/8) - EEG-only means no auxiliary branch, no
 fusion, no triplet mining (see train_epoch_dual_branch.py for that).
 
-OPTIMIZED this session (ahead of the full 138-subject Colab run): the
-original version called encoder(X_i, L_norm_i) TWICE per sample - once
-via forward_batch for l_task's logits, once again for l_harm/l_symb's
-omega. Harmless at 33-66 samples, but a real 2x cost at full-dataset
-scale. Now computes h_i ONCE per sample and derives both the pooled
-z_eeg_i (for logits) and omega_i (for l_harm/l_symb) from that same
-forward pass - mathematically identical result, roughly half the
-encoder compute per epoch.
+OPTIMIZED for full-dataset scale: the original version called
+encoder(X_i, L_norm_i) TWICE per sample - once via forward_batch for
+l_task's logits, once again for l_harm/l_symb's omega. Harmless at
+33-66 samples, but a real 2x cost at full-dataset scale. Now computes
+h_i ONCE per sample and derives both the pooled z_eeg_i (for logits)
+and omega_i (for l_harm/l_symb) from that same forward pass -
+mathematically identical result, roughly half the encoder compute per
+epoch.
 """
 
 from __future__ import annotations
@@ -51,13 +51,13 @@ def train_epoch(
     labels: (n_samples,) long tensor, class index per sample.
 
     class_weights: optional (n_classes,) tensor passed to cross_entropy's
-    `weight` argument. NEW this session -- the real dataset is class-
-    imbalanced (~64% ADHD / 36% Control across the full cohort, similar
-    ratio within most folds), and this training loop is full-batch
-    gradient descent (ONE optimizer.step() per call, n_epochs calls
-    total from train_fold) -- i.e. very few total gradient steps
-    (e.g. 30). That combination (imbalance + few steps + unweighted
-    cross-entropy) is a well-known recipe for the classifier collapsing
+    `weight` argument -- the real dataset is class-imbalanced (~64%
+    ADHD / 36% Control across the full cohort, similar ratio within
+    most folds), and this training loop is full-batch gradient descent
+    (ONE optimizer.step() per call, n_epochs calls total from
+    train_fold) -- i.e. very few total gradient steps (e.g. 30). That
+    combination (imbalance + few steps + unweighted cross-entropy) is a
+    well-known recipe for the classifier collapsing
     to always predict the majority class, which is exactly the pattern
     observed in this project's first full-114-subject run (specificity
     =0.0, sensitivity=1.0 on every one of 5 folds). Pass inverse-

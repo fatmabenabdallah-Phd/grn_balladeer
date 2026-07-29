@@ -20,8 +20,8 @@ Design choices, each with a one-line rationale:
 - Structural graph aggregation (fixed k-NN, precomputed ONCE via
   connectivity/structural_graph.py) instead of magnetic Laplacian:
   near-zero adjacency cost at inference, a deliberate trade validated
-  by this session's own PLV-vs-PLI ablation showing no measurable
-  accuracy cost to simplifying connectivity on this cohort.
+  by the PLV-vs-PLI ablation showing no measurable accuracy cost to
+  simplifying connectivity on this cohort.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ class LightweightTCNEncoder(nn.Module):
     parameters (verify via count_parameters below) -- comparable to
     ICCCI2026's cited ~15k-parameter TCN-GNN benchmark, not the
     substantially larger GRN encoder (magnetic Laplacian stack +
-    resonance head) used earlier this session.
+    resonance head) used elsewhere in this project.
     """
 
     def __init__(self, hidden_channels: int = 8, n_layers: int = 4, kernel_size: int = 3):

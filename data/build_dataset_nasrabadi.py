@@ -8,16 +8,14 @@ non-overlapping windows -- the same windowing already used for the
 RF/EEGNet Nasrabadi experiments (4s / 512 samples at 128Hz), so results
 are directly comparable.
 
-THE MOTIVATING QUESTION this module exists to answer: GRN was never
-tested on Nasrabadi this session (its event-locked epoching was
-considered incompatible with continuous data, and porting it was
-judged not worth the effort at the time). But this leaves an
-unresolved ambiguity the rest of this session's cross-dataset findings
-don't: is GRN's fixed-connectivity, single-scalar-per-node design
-fundamentally too constrained to learn ANY EEG-ADHD signal (as
-distinct from BALLADEER's data-quality problems), or would it also
-succeed here the way RF/EEGNet/TCN-alone did? This module makes that
-test possible for the first time.
+THE MOTIVATING QUESTION this module exists to answer: GRN had not
+previously been tested on Nasrabadi (its event-locked epoching was
+considered incompatible with continuous data). This left an unresolved
+ambiguity other cross-dataset findings could not settle: is GRN's
+fixed-connectivity, single-scalar-per-node design fundamentally too
+constrained to learn ANY EEG-ADHD signal (as distinct from BALLADEER's
+data-quality problems), or would it also succeed here the way
+RF/EEGNet/TCN-alone did? This module makes that test possible.
 
 All connectivity, CQT, and Laplacian machinery is imported unchanged
 from the existing project modules (connectivity.phase_connectivity,
@@ -67,8 +65,8 @@ def build_subject_dataset_nasrabadi(
     """Builds GRN-ready (X_i, L_norm_i) graphs from one subject's
     continuous Nasrabadi recording, one graph per non-overlapping
     window_samples-length window (default 512 samples = 4.0s at
-    128Hz, matching the RF/EEGNet Nasrabadi windowing already used
-    this session for a direct, apples-to-apples comparison).
+    128Hz, matching the RF/EEGNet Nasrabadi windowing for a direct,
+    apples-to-apples comparison).
 
     channel_data: (n_channels, n_samples) real-valued numpy array,
     ordered to match NASRABADI_CHANNELS (19 channels). Raw signal, no
@@ -82,16 +80,16 @@ def build_subject_dataset_nasrabadi(
     BALLADEER pipeline -- kept the same here so GRN's own architecture
     and hyperparameters are unchanged, only the epoching source differs.
 
-    frozen_connectivity: NEW this session -- by default (False),
-    PLV/PLI connectivity is recomputed fresh for every window, a real
-    recurring per-window cost, not a one-time calibration step. When
-    True, connectivity is computed ONCE from the subject's full
-    continuous recording and the same Laplacian is reused for every
-    window (only the CQT node features still vary per window). Tests
-    whether per-window dynamic connectivity is necessary for GRN's
-    performance or whether a single frozen graph -- computationally
-    far cheaper for continuous deployment -- performs comparably. See
-    build_dataset.py's identical parameter for the full rationale.
+    frozen_connectivity: by default (False), PLV/PLI connectivity is
+    recomputed fresh for every window, a real recurring per-window
+    cost, not a one-time calibration step. When True, connectivity is
+    computed ONCE from the subject's full continuous recording and the
+    same Laplacian is reused for every window (only the CQT node
+    features still vary per window). Tests whether per-window dynamic
+    connectivity is necessary for GRN's performance or whether a single
+    frozen graph -- computationally far cheaper for continuous
+    deployment -- performs comparably. See build_dataset.py's identical
+    parameter for the full rationale.
 
     Returns a list of (X_i, L_norm_i) graphs, one per window, in the
     exact same format GRN's training loop already expects.

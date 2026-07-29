@@ -55,9 +55,9 @@ def build_subject_dataset_lightweight(
       - band_power_features: (n_features,) numpy array from
         eval.baselines.extract_band_power_features (band power per
         channel + theta/beta ratio) -- the same features that let a
-        plain Random Forest reach AUC=0.668 this session, reused here
-        as an explicit, near-zero-cost auxiliary signal fused with the
-        TCN's learned representation rather than discarded.
+        plain Random Forest reach AUC=0.668, reused here as an
+        explicit, near-zero-cost auxiliary signal fused with the TCN's
+        learned representation rather than discarded.
 
     skip_ica: tests the hypothesis that ICA-based artifact removal may
     be stripping genuine, frontally-weighted ADHD-relevant signal along
@@ -68,13 +68,12 @@ def build_subject_dataset_lightweight(
     discovery that the ExG reference channels were silently dead
     throughout this project.
 
-    reject_epochs: NEW this session -- drops individual epochs whose
-    peak-to-peak amplitude (any channel) exceeds
-    epoch_rejection_threshold (preprocessing.epoch_rejection), a
-    standard EEG QC step never previously implemented on BALLADEER.
-    Complements clean_bad_channels: a channel can be consistently bad
-    across a whole recording (handled there), while an epoch can be
-    transiently corrupted on an otherwise-good channel (handled here).
+    reject_epochs: drops individual epochs whose peak-to-peak amplitude
+    (any channel) exceeds epoch_rejection_threshold
+    (preprocessing.epoch_rejection), a standard EEG QC step. Complements
+    clean_bad_channels: a channel can be consistently bad across a whole
+    recording (handled there), while an epoch can be transiently
+    corrupted on an otherwise-good channel (handled here).
 
     level: same convention as build_dataset.py's build_subject_dataset
     (e.g. 'Level1') -- pass the confirmed level explicitly. Flag-file

@@ -5,15 +5,15 @@ Extracts a fixed-size feature vector from BALLADEER's raw eye-tracking
 recordings (session 1, AttentionRobotsDesktop task), for fusion with
 EEG in the same style as the existing EDA/behavioral auxiliary branch.
 
-Raw data format (verified against real subject files this session):
-one CSV per subject with columns [timeChecked, weight, looked_col,
-looked_row] -- gaze mapped to a discrete grid, sampled at ~60Hz
-(timeChecked step ~0.0167s). `weight` was observed constant (100)
-across all rows of every inspected file and is not used as a feature.
+Raw data format: one CSV per subject with columns [timeChecked,
+weight, looked_col, looked_row] -- gaze mapped to a discrete grid,
+sampled at ~60Hz (timeChecked step ~0.0167s). `weight` was observed
+constant (100) across all rows of every inspected file and is not used
+as a feature.
 
-CRITICAL FINDING this session: grid size (max looked_col/looked_row)
-varies substantially across the 112-subject cohort (col_max ranging
-9-47, row_max 1-14), most likely reflecting different screen/window
+CRITICAL FINDING: grid size (max looked_col/looked_row) varies
+substantially across the 112-subject cohort (col_max ranging 9-47,
+row_max 1-14), most likely reflecting different screen/window
 resolutions across acquisition setups rather than a fixed canonical
 grid. Raw gaze-position dispersion/entropy would therefore NOT be
 comparable across subjects without normalization -- this module
@@ -25,9 +25,9 @@ which may itself be a mild underestimate if a subject never looked at
 the true edge of their screen -- a limitation of this normalization
 worth flagging rather than assuming away.
 
-Also discovered this session: at least one subject (UB0110) has a
-severely truncated recording (14 samples, 0.22s) that is almost
-certainly corrupted/incomplete rather than a genuine short session --
+Also: at least one subject (UB0110) has a severely truncated
+recording (14 samples, 0.22s) that is almost certainly
+corrupted/incomplete rather than a genuine short session --
 extract_eyetracking_features raises ValueError for recordings below
 MIN_DURATION_S so callers can detect and exclude these rather than
 silently including a non-representative feature vector.
@@ -70,7 +70,7 @@ def extract_eyetracking_features(et_df: pd.DataFrame) -> np.ndarray:
 
     Raises ValueError if the recording is shorter than MIN_DURATION_S
     (likely corrupted/incomplete, e.g. the truncated 0.22s recording
-    found for one subject this session) or has fewer than 2 samples.
+    found for one subject) or has fewer than 2 samples.
 
     Returns a (6,) float32 numpy array, order matching
     EYETRACKING_FEATURE_NAMES.
@@ -92,16 +92,16 @@ def extract_eyetracking_features(et_df: pd.DataFrame) -> np.ndarray:
         raise ValueError(
             f"extract_eyetracking_features: recording duration {duration_s:.2f}s "
             f"is below MIN_DURATION_S={MIN_DURATION_S}s -- likely corrupted/incomplete "
-            f"(e.g. UB0110's 0.22s/14-sample recording found this session)."
+            f"(e.g. UB0110's 0.22s/14-sample recording)."
         )
 
     cols_raw = et_df["looked_col"].to_numpy().astype(np.float64)
     rows_raw = et_df["looked_row"].to_numpy().astype(np.float64)
 
     # Normalize to [0,1] per axis using THIS subject's own observed grid
-    # extent -- grid size varies across the cohort (verified this
-    # session: col_max 9-47, row_max 1-14), so raw pixel/cell counts are
-    # not comparable across subjects without this step.
+    # extent -- grid size varies across the cohort (col_max 9-47,
+    # row_max 1-14), so raw pixel/cell counts are not comparable across
+    # subjects without this step.
     col_max = cols_raw.max()
     row_max = rows_raw.max()
     cols_norm = cols_raw / col_max if col_max > 0 else cols_raw

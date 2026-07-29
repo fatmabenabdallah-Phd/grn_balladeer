@@ -92,17 +92,17 @@ def check_subject_identity_leakage(
     state" -- not a re-test of generalization to unseen subjects (that's
     what the real subject-disjoint CV already measures).
 
-    MOTIVATION (added this session): the first full 114-subject 5-fold
-    CV showed non-trivial in-sample (train-subject) AUC gains (0.546->
-    0.610 across training) but chance-level held-out AUC (0.489±0.042)
-    -- consistent with, though not proof of, the model latching onto
-    per-subject idiosyncrasies (impedance, individual EEG baseline)
-    that happen to correlate with class within a given training split,
-    rather than a genuinely generalizable ADHD signal. A HIGH subject-
-    identity recoverability here would support that interpretation
-    directly. Reuses check_sex_leakage's structure/interpretation
-    pattern above (see its own docstring for the sex-specific nuance,
-    which doesn't apply here -- there is no legitimate reason embeddings
+    MOTIVATION: the first full 114-subject 5-fold CV showed non-trivial
+    in-sample (train-subject) AUC gains (0.546->0.610 across training)
+    but chance-level held-out AUC (0.489±0.042) -- consistent with,
+    though not proof of, the model latching onto per-subject
+    idiosyncrasies (impedance, individual EEG baseline) that happen to
+    correlate with class within a given training split, rather than a
+    genuinely generalizable ADHD signal. A HIGH subject-identity
+    recoverability here would support that interpretation directly.
+    Reuses check_sex_leakage's structure/interpretation pattern above
+    (see its own docstring for the sex-specific nuance, which doesn't
+    apply here -- there is no legitimate reason embeddings
     SHOULD encode subject identity, unlike sex).
 
     Returns {'mean_cv_accuracy', 'std_cv_accuracy', 'chance_accuracy',

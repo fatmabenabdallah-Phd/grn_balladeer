@@ -47,12 +47,12 @@ def _fallback_frontal_proxy(raw: mne.io.Raw) -> Optional[np.ndarray]:
 def _is_dead_reference(raw: mne.io.Raw, ch_names: List[str], std_threshold: float = 1e-10) -> bool:
     """Checks whether the given channel(s) are effectively flat
     (std below std_threshold) -- i.e. a dead/non-functional reference,
-    not a genuine signal. Discovered this session: CGX's ExG channels
-    (typed 'eog' via load_eeg_cgx(include_exg_as_eog=True)) are flat on
-    every subject checked, meaning find_bads_eog() against them never
-    excludes anything -- ICA-based artifact removal was silently
-    inactive throughout this project as a result. Returns True if ALL
-    given channels are flat (a partial reference, e.g. one working EOG
+    not a genuine signal. CGX's ExG channels (typed 'eog' via
+    load_eeg_cgx(include_exg_as_eog=True)) are flat on every subject
+    checked, meaning find_bads_eog() against them never excludes
+    anything -- ICA-based artifact removal was silently inactive
+    throughout this project as a result. Returns True if ALL given
+    channels are flat (a partial reference, e.g. one working EOG
     channel out of two, is still usable and should not trigger the
     fallback).
     """
@@ -72,12 +72,12 @@ def run_ica_artifact_removal(
     - If `raw` contains channel(s) of type 'eog' AND they carry a real
       (non-flat) signal, uses MNE's standard ica.find_bads_eog()
       against them (preferred path).
-    - NEW this session: if the 'eog'-typed channels are flat (a dead
-      reference -- see _is_dead_reference, discovered via CGX's ExG
-      channels being silently non-functional on every subject checked),
-      automatically falls back to the frontal-channel-average proxy
-      heuristic instead of trusting a reference known not to carry a
-      real signal. This is what actually activates artifact removal on
+    - If the 'eog'-typed channels are flat (a dead reference -- see
+      _is_dead_reference, discovered via CGX's ExG channels being
+      silently non-functional on every subject checked), automatically
+      falls back to the frontal-channel-average proxy heuristic
+      instead of trusting a reference known not to carry a real
+      signal. This is what actually activates artifact removal on
       CGX for the first time in this project; previously the 'eog' type
       alone was enough to take the (broken) preferred path.
     - Otherwise (no 'eog'-typed channel at all, e.g. Emotiv), falls back

@@ -3,9 +3,9 @@ grn_balladeer.training.train_epoch_lightweight
 ==================================================
 Training loop for the lightweight TCN + structural-graph + band-power-
 fusion architecture. Mirrors train_epoch_batched.py's vectorized,
-mini-batch design (this session's own earlier fix for the GRN training
-loop's speed problem) rather than repeating the original per-sample
-Python loop mistake.
+mini-batch design (the same fix applied to the GRN training loop's
+speed problem) rather than repeating the original per-sample Python
+loop mistake.
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ class LightweightClassifier(nn.Module):
     """Fuses the TCN-graph node embeddings (mean-pooled over nodes) with
     explicit band-power features (theta/beta ratio included) via
     concatenation, then a small MLP. The explicit features are what let
-    a plain Random Forest reach AUC=0.668 this session -- fusing them
-    here rather than relying solely on the TCN's learned representation
-    is a deliberate hedge, not an admission the TCN alone is expected
-    to underperform; ablating this fusion (TCN-only vs. TCN+features)
-    is a natural next experiment once this architecture is validated
+    a plain Random Forest reach AUC=0.668 -- fusing them here rather
+    than relying solely on the TCN's learned representation is a
+    deliberate hedge, not an admission the TCN alone is expected to
+    underperform; ablating this fusion (TCN-only vs. TCN+features) is
+    a natural next experiment once this architecture is validated
     end-to-end.
     """
 

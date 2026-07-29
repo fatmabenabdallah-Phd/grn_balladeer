@@ -58,8 +58,8 @@ def _flatten_subjects(
     device once is enough to get the whole forward/backward pass
     running there. Confirmed by grep across model/losses/training: no
     module ever called .cuda() or .to(device) anywhere before this fix
-    -- meaning every previous run (including the first full 114-subject
-    CV run this session) silently ran on CPU even with a GPU attached
+    -- meaning every previous run (including the first full
+    114-subject CV run) silently ran on CPU even with a GPU attached
     (0.0/15.0 GB GPU RAM used during that run is the direct evidence).
     """
     batch, labels, ids = [], [], []
@@ -133,19 +133,19 @@ def train_fold(
 
     optimizer = torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
 
-    # NEW this session: inverse-frequency class weights, computed from
-    # THIS FOLD's train labels only (not the global cohort ratio) --
-    # addresses the majority-class-collapse pattern found in the first
-    # full 114-subject run (specificity=0.0 on every fold). See
+    # Inverse-frequency class weights, computed from THIS FOLD's train
+    # labels only (not the global cohort ratio) -- addresses the
+    # majority-class-collapse pattern found in the first full
+    # 114-subject run (specificity=0.0 on every fold). See
     # train_epoch's updated docstring for the full diagnosis.
     class_counts = torch.bincount(train_labels, minlength=2).float()
     class_weights = (class_counts.sum() / (2.0 * class_counts)).to(device)
 
-    # NEW this session: stack the EEG-only training batch ONCE, before
-    # the epoch loop -- train_epoch_batched used to do this stacking
-    # itself on every call (60x for a 60-epoch fold), which was itself
-    # a real per-sample overhead cost across ~4600 samples, the same
-    # KIND of problem vectorizing the encoder call was meant to solve.
+    # Stack the EEG-only training batch ONCE, before the epoch loop --
+    # train_epoch_batched used to do this stacking itself on every call
+    # (60x for a 60-epoch fold), which was itself a real per-sample
+    # overhead cost across ~4600 samples, the same KIND of problem
+    # vectorizing the encoder call was meant to solve.
     if not dual_branch:
         train_X_batch = torch.stack([X_i for X_i, _ in train_batch])   # (B, N, Cin)
         train_L_batch = torch.stack([L_i for _, L_i in train_batch])   # (B, N, N)
@@ -155,12 +155,12 @@ def train_fold(
     def _evaluate_val_batched():
         """EEG-only-only helper: one batched forward pass over the held-
         out subjects, no grad. Used both for the final evaluation AND
-        (new this session) periodic mid-training checkpoints, so the
-        val-performance trajectory is visible, not just its endpoint --
-        needed to tell apart 'never learns anything generalizable' from
-        'overfits partway through training' (the current ambiguity after
-        a 300-epoch/lr=1e-2 diagnostic run showed falling train loss but
-        below-chance final val AUC)."""
+        periodic mid-training checkpoints, so the val-performance
+        trajectory is visible, not just its endpoint -- needed to tell
+        apart 'never learns anything generalizable' from 'overfits
+        partway through training' (the ambiguity a 300-epoch/lr=1e-2
+        diagnostic run showed: falling train loss but below-chance
+        final val AUC)."""
         encoder.eval(); resonance_head.eval(); head.eval()
         with torch.no_grad():
             h_val = encoder(val_X_batch, val_L_batch)
@@ -172,36 +172,36 @@ def train_fold(
         return evaluate(val_labels.cpu().numpy(), preds_val, probs_val)
 
     history = []
-    val_trajectory = []  # NEW: (epoch_idx, EvalResult) pairs, EEG-only path only
+    val_trajectory = []  # (epoch_idx, EvalResult) pairs, EEG-only path only
     n_train_samples = train_X_batch.shape[0] if not dual_branch else len(train_batch)
 
     for epoch_idx in range(n_epochs):
         if dual_branch:
-            # NEW this session: class_weights now supported here too
-            # (mirrors the EEG-only fix) -- important before testing
-            # dual-branch, to avoid the same majority-class collapse
-            # found in the very first EEG-only run. Still NOT vectorized/
-            # mini-batched like the EEG-only path (train_epoch_dual_branch
-            # remains the original per-sample loop) -- expect this to be
-            # noticeably slower per epoch than the EEG-only path.
+            # class_weights supported here too (mirrors the EEG-only
+            # fix) -- important before testing dual-branch, to avoid the
+            # same majority-class collapse found in the very first
+            # EEG-only run. Still NOT vectorized/mini-batched like the
+            # EEG-only path (train_epoch_dual_branch remains the
+            # original per-sample loop) -- expect this to be noticeably
+            # slower per epoch than the EEG-only path.
             stats = train_epoch_dual_branch(
                 encoder, resonance_head, aux_encoder, fusion, head,
                 train_batch, train_labels, train_ids, aux_vectors_by_subject, ch_names, optimizer,
                 lambda1=lambda1, lambda2=lambda2, lambda3=lambda3, class_weights=class_weights,
             )
         else:
-            # NEW this session: real mini-batch training instead of one
-            # full-batch gradient step per epoch. Diagnosed root cause of
-            # the low in-sample AUC ceiling (~0.61 after 300 full-batch
-            # steps, evaluated on the TRAINING subjects themselves): full-
+            # Real mini-batch training instead of one full-batch
+            # gradient step per epoch. Diagnosed root cause of the low
+            # in-sample AUC ceiling (~0.61 after 300 full-batch steps,
+            # evaluated on the TRAINING subjects themselves): full-
             # batch GD gives only n_epochs total gradient updates
             # regardless of dataset size -- with batch_size=64 on ~4600
             # samples, each epoch now does ~72 gradient steps instead of 1,
             # a ~72x increase in optimization steps for the same n_epochs.
-            # Switched to the vectorized train_epoch_batched this session --
-            # verified numerically equivalent to train_epoch (logits, l_task,
-            # l_harm, l_symb all matched to float precision) and ~10x faster
-            # per call in sandbox testing.
+            # Uses the vectorized train_epoch_batched -- verified
+            # numerically equivalent to train_epoch (logits, l_task,
+            # l_harm, l_symb all matched to float precision) and ~10x
+            # faster per call.
             if batch_size is None or batch_size >= n_train_samples:
                 stats = train_epoch_batched(
                     encoder, head, resonance_head, train_X_batch, train_L_batch, train_labels, ch_names, optimizer,
@@ -261,11 +261,11 @@ def train_fold(
         "val_trajectory": val_trajectory,
         "val_subject_ids": val_subject_ids,
         "final_omega_collapse": collapse,
-        # NEW this session: expose the trained model itself (already in
-        # .eval() mode) so callers can extract embeddings afterward --
-        # e.g. for check_subject_identity_leakage, which needs per-epoch
-        # pooled embeddings that train_fold doesn't compute/return itself,
-        # and for recomputing probabilities with a calibrated decision
+        # Exposes the trained model itself (already in .eval() mode) so
+        # callers can extract embeddings afterward -- e.g. for
+        # check_subject_identity_leakage, which needs per-epoch pooled
+        # embeddings that train_fold doesn't compute/return itself, and
+        # for recomputing probabilities with a calibrated decision
         # threshold (find_optimal_threshold) instead of the fixed 0.5 cutoff.
         "encoder": encoder,
         "resonance_head": resonance_head,
@@ -307,7 +307,7 @@ def run_cross_validation(
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[run_cross_validation] device utilisé pour tous les folds : {device}")
+    print(f"[run_cross_validation] device used for all folds: {device}")
     train_fold_kwargs["device"] = device
 
     labels_by_subject = dict(zip(label_df["user_id"], label_df["label"]))

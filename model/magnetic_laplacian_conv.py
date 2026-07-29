@@ -75,10 +75,10 @@ class MagneticLaplacianConv(nn.Module):
         the original, still-default usage everywhere else in the
         project -- OR a batch of graphs sharing the same node count
         but each with its own connectivity (X: (B,N,Cin), L_norm:
-        (B,N,N)), auto-detected from X.dim(). Added this session to
-        vectorize train_epoch's per-sample Python loop into one real
-        GPU batch call; NOT yet wired into train_epoch itself until
-        numerically verified identical to the per-sample loop (see
+        (B,N,N)), auto-detected from X.dim(). Supports vectorizing
+        train_epoch's per-sample Python loop into one GPU batch call;
+        not yet wired into train_epoch itself until numerically
+        verified identical to the per-sample loop (see
         training/train_epoch_batched.py's own correctness test).
 
         torch.matmul batches automatically over any leading dims, so

@@ -58,8 +58,8 @@ def build_subject_dataset_lightweight(
       - band_power_features: (n_features,) numpy array from
         eval.baselines.extract_band_power_features (band power per
         channel + theta/beta ratio) -- the same features that let a
-        plain Random Forest reach AUC=0.668 this session, reused here
-        as an explicit, near-zero-cost auxiliary signal fused with the
+        plain Random Forest reach AUC=0.668, reused here as an
+        explicit, near-zero-cost auxiliary signal fused with the
         TCN's learned representation rather than discarded.
 
     skip_ica: tests the hypothesis that ICA-based artifact removal may
@@ -84,7 +84,7 @@ def build_subject_dataset_lightweight(
     bad-channel cleaning (if enabled) so a genuinely bad channel does
     not corrupt the average it contributes to, and BEFORE ICA.
 
-    surface_laplacian: NEW this session -- applies surface Laplacian /
+    surface_laplacian: applies surface Laplacian /
     Current Source Density re-referencing (MNE's built-in
     compute_current_source_density()), a spatial filter that sharpens
     localization by emphasizing local, radially-oriented sources over

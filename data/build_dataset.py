@@ -62,7 +62,7 @@ def build_subject_dataset(
     kept by epoch_by_flag_events (events outside the recording's
     available range are dropped, not an error -- see epoching.py).
 
-    return_epochs: NEW this session -- if True, ALSO returns the raw
+    return_epochs: if True, ALSO returns the raw
     mne.Epochs object used internally to build the graphs, as
     (dataset, epochs) instead of just dataset. Added so baseline
     comparisons (eval.baselines.extract_band_power_features, which
@@ -79,8 +79,8 @@ def build_subject_dataset(
     against slackline_flags_info.json, or direct session metadata) is
     the caller's responsibility; pass the confirmed level explicitly.
 
-    bands: CHANGED this session -- was a single band tuple (default
-    alpha 8-13Hz only), now a list of bands, default theta+alpha+beta
+    bands: a list of bands (previously a single band tuple, default
+    alpha 8-13Hz only), default theta+alpha+beta
     ((4,8),(8,13),(13,30)). Motivation: the harmonic/symbolic losses
     (L_harm, L_symb) are grounded in CROSS-frequency phase synchrony
     literature (Palva et al.) and the theta/beta ratio ADHD literature
@@ -97,34 +97,34 @@ def build_subject_dataset(
     [(8.0, 13.0)]) exactly reproduces the old alpha-only behavior --
     this change is backward compatible, not a breaking one.
 
-    connectivity_metric: NEW this session -- 'plv' (default, unchanged
+    connectivity_metric: 'plv' (default, unchanged
     behavior) or 'pli' (Phase Lag Index, an alternative connectivity
     measure less sensitive to volume conduction/zero-lag artifacts than
     PLV, since PLI discards exact zero-phase-lag synchrony by
-    construction -- reserved for this ablation since Week 2, per
-    connectivity/phase_connectivity.py's own compute_pli_matrix
-    docstring). Only the amplitude/strength matrix changes between the
-    two metrics (PLV vs PLI); the mean phase-difference matrix feeding
-    into the complex edge weights is computed identically either way,
-    since PLI itself has no natural phase-difference counterpart (it
-    discards phase sign by construction).
+    construction -- see connectivity/phase_connectivity.py's own
+    compute_pli_matrix docstring). Only the amplitude/strength matrix
+    changes between the two metrics (PLV vs PLI); the mean
+    phase-difference matrix feeding into the complex edge weights is
+    computed identically either way, since PLI itself has no natural
+    phase-difference counterpart (it discards phase sign by
+    construction).
 
-    clean_bad_channels: NEW this session -- detects and interpolates
+    clean_bad_channels: detects and interpolates
     bad EEG channels (preprocessing.bad_channels) BEFORE the PLV/PLI
     connectivity graph and magnetic Laplacian are built, rather than
     only at the band-power-feature stage (as in
     build_dataset_lightweight.py). This is the definitive test of a
-    hypothesis raised by GRN's own cross-dataset validation
-    (Section~\ref{sec:discussion} of the manuscript): GRN's fixed
-    connectivity graph may propagate a corrupted channel's noise to
-    every node connected to it via the magnetic-Laplacian convolution,
-    a failure mode channel-independent architectures (Random Forest,
-    TCN alone) do not share. If this hypothesis is correct, cleaning
-    channels BEFORE the graph is constructed (not just before
-    band-power features are computed) should matter specifically for
-    GRN, in a way it did not for the classical baselines.
+    hypothesis raised by GRN's own cross-dataset validation (see the
+    manuscript's Discussion section): GRN's fixed connectivity graph
+    may propagate a corrupted channel's noise to every node connected
+    to it via the magnetic-Laplacian convolution, a failure mode
+    channel-independent architectures (Random Forest, TCN alone) do
+    not share. If this hypothesis is correct, cleaning channels BEFORE
+    the graph is constructed (not just before band-power features are
+    computed) should matter specifically for GRN, in a way it did not
+    for the classical baselines.
 
-    exclude_bad_channels: NEW this session -- mutually exclusive with
+    exclude_bad_channels: mutually exclusive with
     clean_bad_channels. Instead of interpolating detected bad channels
     (which reconstructs each one as a linear combination of its clean
     neighbors, potentially inflating PLV between them with spurious,
@@ -149,7 +149,7 @@ def build_subject_dataset(
     for anything going through train_fold.
 
     fixed_exclude_channels: a fixed list of channel names (e.g. the
-    dataset-wide top bad channels already characterized this session --
+    dataset-wide top bad channels already characterized --
     Fp1, Fp2, Fpz, AF7, AF8, F7, CP6, Cz, A2, C4) to drop identically
     for EVERY subject, regardless of that individual subject's own
     detected bad channels. Guarantees uniform node count across the
@@ -161,7 +161,7 @@ def build_subject_dataset(
     but "does removing the channels known to be chronically
     problematic across the cohort, uniformly, help GRN."
 
-    frozen_connectivity: NEW this session -- by default (False), PLV/PLI
+    frozen_connectivity: by default (False), PLV/PLI
     connectivity (and the resulting magnetic Laplacian) is recomputed
     FRESH for every single epoch, inside the per-epoch loop below --
     this is a real, recurring computational cost at inference time, not

@@ -60,19 +60,19 @@ def extract_resonance_frequency(
     does not accept complex input directly. Returns (n_nodes,) real,
     bounded to [omega_min, omega_max].
 
-    BUG FIX (found empirically this session, real UB0136 training run):
-    the head's raw linear output is unconstrained and can drift toward 0
-    during training (observed: min|omega| going 0.019 -> 0.010 over a
-    few epochs). Since harmonic_loss/compute_consonance_degree compute
-    omega_i/omega_j, an omega_j approaching 0 makes that ratio explode
-    towards infinity - loss_harm was observed reaching >4000 within a
-    handful of epochs. Gradient clipping alone does NOT fix this: it
-    bounds the gradient STEP size, not the forward-pass value once
-    omega is already near 0 - the explosion recurred (worse: never
-    recovered) even with clip_grad_norm_(max_norm=1.0) applied, under a
-    different real training run/seed. Fix: squash the raw linear output
-    through a sigmoid and rescale to [omega_min, omega_max] (default
-    1-45 Hz, matching the EEG bandpass range already used throughout
+    BUG FIX: the head's raw linear output is unconstrained and can drift
+    toward 0 during training (observed: min|omega| going 0.019 -> 0.010
+    over a few epochs). Since harmonic_loss/compute_consonance_degree
+    compute omega_i/omega_j, an omega_j approaching 0 makes that ratio
+    explode towards infinity - loss_harm was observed reaching >4000
+    within a handful of epochs. Gradient clipping alone does NOT fix
+    this: it bounds the gradient STEP size, not the forward-pass value
+    once omega is already near 0 - the explosion recurred (worse:
+    never recovered) even with clip_grad_norm_(max_norm=1.0) applied,
+    under a different training run/seed. Fix: squash the raw linear
+    output through a sigmoid and rescale to [omega_min, omega_max]
+    (default 1-45 Hz, matching the EEG bandpass range already used
+    throughout
     preprocessing/filtering.py) - omega can now never reach 0 or diverge,
     by construction, regardless of what the raw linear layer outputs.
 

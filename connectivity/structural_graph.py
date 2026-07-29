@@ -9,9 +9,9 @@ measurements... enabling real-time operation on resource-constrained
 devices") -- the deliberate trade for a lightweight, edge-deployable
 architecture: sacrifice the ability to capture dynamic functional
 connectivity (PLV/PLI's real advantage) for near-zero adjacency cost,
-since the earlier ablations this session (PLV vs PLI, single- vs
-multi-band) found no measurable accuracy cost to simplifying
-connectivity on this cohort anyway.
+since the PLV-vs-PLI and single- vs multi-band ablations found no
+measurable accuracy cost to simplifying connectivity on this cohort
+anyway.
 """
 
 from __future__ import annotations

@@ -3,28 +3,20 @@ grn_balladeer/model/aux_branch_decoder.py
 =============================================
 Decoder for the auxiliary (EDA + behavioral) branch, mirroring
 AuxBranchEncoder. Reconstructs the raw 12-dim aux vector from
-Encoder2's embedding -- a self-supervised regularizer, motivated by a
-schema the user sketched by hand (dual-encoder + fusion + classify,
-PLUS a decoder on Encoder2 producing a reconstruction/distribution
-loss, PLUS a triplet loss touching both Encoder2 and the fused
-representation).
+Encoder2's embedding -- a self-supervised regularizer for the
+auxiliary branch, distinct from train_epoch_dual_branch.py's default
+training loop (task + harmonic + symbolic + triplet losses only, no
+decoder or reconstruction loss).
 
-This was NEVER implemented in this project's dual-branch model before
-this session -- the existing train_epoch_dual_branch.py (Module 9) has
-no decoder or reconstruction loss at all, only task + harmonic + symbolic
-+ triplet losses on the fused embedding. Confirmed by direct inspection
-of that file this session.
-
-Motivation for trying this now: the auxiliary branch is trained on only
-78 subjects (EDA-real-only subset) -- a reconstruction objective adds a
-self-supervised training signal that doesn't need labels, potentially
+Rationale: the auxiliary branch is trained on only 78 subjects
+(EDA-real-only subset) -- a reconstruction objective adds a
+self-supervised training signal that requires no labels, potentially
 regularizing AuxBranchEncoder toward a richer representation than
-classification loss alone can shape at this sample size, similar in
-spirit to (but architecturally distinct from) the EEG-side autoencoder
-pretraining already tried and found ineffective for the EEG branch
-alone earlier this session -- this is a genuinely different test (aux
-branch, not EEG branch; joint multi-task training, not a separate
-pretraining phase).
+classification loss alone can shape at this sample size. This is
+distinct from EEG-side autoencoder pretraining (found ineffective for
+the EEG branch alone): here reconstruction is a joint multi-task
+training signal on the auxiliary branch, not a separate pretraining
+phase on EEG.
 """
 
 from __future__ import annotations

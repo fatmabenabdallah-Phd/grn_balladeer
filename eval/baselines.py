@@ -68,7 +68,7 @@ def extract_band_power_features(
     theta/beta ratio, from an mne.Epochs object (or a np.ndarray of shape
     (n_epochs, n_channels, n_samples)).
 
-    channels: FIXED this session -- was declared but never actually
+    channels: BUG FIX -- was declared but never actually
     used (a real bug: epochs.get_data() was always called with no
     picks, silently including whatever channels happen to be in the
     Epochs object, e.g. extra EOG/reference channels beyond the intended
@@ -152,7 +152,7 @@ def train_rf_baseline(
 ) -> RandomForestClassifier:
     """Random Forest — no standardization needed.
 
-    NEW this session: hyperparameters exposed for Optuna tuning
+    Hyperparameters exposed for Optuna tuning
     (n_estimators, max_depth, max_features, min_samples_split,
     min_samples_leaf), defaulting to this project's original
     hard-coded values (n_estimators=300, max_depth=None, class_weight=
@@ -179,7 +179,7 @@ class EvalResult:
     f1: float
     auc: float
     n: int
-    # EXTENDED this session - the original 3 metrics alone can hide a model
+    # These extend the original 3 metrics alone, which can hide a model
     # that mostly predicts the majority class, given the real ~64%/36%
     # ADHD/Control imbalance in the 138-subject cohort. balanced_accuracy
     # averages per-class recall (not fooled by imbalance); f1_class0/1 and
@@ -197,7 +197,7 @@ def find_optimal_threshold(y_true: np.ndarray, y_proba: np.ndarray) -> dict:
     (sensitivity + specificity - 1) on the ROC curve, rather than the
     default fixed 0.5 cutoff.
 
-    Added this session to address a real observed pattern: a model can
+    Addresses a real observed pattern: a model can
     have a genuinely informative AUC (e.g. 0.68-0.77 on the EDA-real-only
     dual-branch subset) while STILL always predicting the majority class
     at threshold=0.5 (sensitivity=1.0, specificity=0.0) when classes are

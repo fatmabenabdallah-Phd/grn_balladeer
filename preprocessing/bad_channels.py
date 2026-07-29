@@ -2,12 +2,12 @@
 grn_balladeer.preprocessing.bad_channels
 ============================================
 Bad-channel detection and interpolation for CGX recordings. Motivated
-directly by this session's discovery that the ExG reference channels
-were silently flat (dead) throughout the project, which went
-undetected because no channel-quality check existed anywhere in the
-pipeline before this module. If reference channels can silently fail,
-ordinary EEG channels plausibly can too (poor scalp contact, movement
-artifact, etc.) -- this has never been checked.
+directly by the discovery that the ExG reference channels were
+silently flat (dead) throughout the project, which went undetected
+because no channel-quality check existed anywhere in the pipeline
+before this module. If reference channels can silently fail, ordinary
+EEG channels plausibly can too (poor scalp contact, movement artifact,
+etc.) -- this had never been checked.
 
 Design choice: detect via a robust z-score on log-variance across
 channels (median/MAD-based, insensitive to the bad channels

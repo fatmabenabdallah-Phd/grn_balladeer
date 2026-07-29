@@ -1,10 +1,10 @@
 """
 grn_balladeer.data.subject_files
 ===================================
-Generalizes subject-file discovery from the 4 hand-picked subjects
-(UB0004/UB0022/UB0136/UB0023, hardcoded paths in earlier sessions) to
-the full 158-folder Drive dataset, based on the real directory tree
-inspected this session (`balladeer_tree.csv`, Drive-side listing).
+Generalizes subject-file discovery from a handful of hand-picked
+subjects (hardcoded paths in earlier versions of this module) to the
+full 158-folder Drive dataset, based on the real directory tree
+(`balladeer_tree.csv`, Drive-side listing).
 
 Why this exists: `data.build_dataset.build_subject_dataset` takes exact
 file paths as arguments -- it does not search for them. Something has
@@ -25,19 +25,19 @@ the real filenames are NOT fully regular. Confirmed irregularities
     the dataset paper's own Table 1. Missing CGX for a given
     subject/level is EXPECTED, not an error -- must return None, not
     raise.
-  - Verified (this session, via glob against a full mirror of the real
-    158-subject tree): no case of >1 CGX or >1 TAGS file matching for
-    the same subject/level/session -- the tolerant glob does not
-    introduce ambiguity, at least on the tree inspected.
+  - Verified (via glob against a full mirror of the real 158-subject
+    tree): no case of >1 CGX or >1 TAGS file matching for the same
+    subject/level/session -- the tolerant glob does not introduce
+    ambiguity, at least on the tree inspected.
 
 Only Slackline (CGX + TAGS) is covered here. AttentionRobotsDesktop
 (Emotiv, eye-tracking) and Cognifit (Emotiv only) use a different
 naming convention (`EPOCX`/`EPOCPLUS`, `EYE_TRACKING_DATA`, `GAME_DATA`)
-and are NOT needed yet -- current focus is session 2 / Slackline / CGX
-first, per this session's plan (session 1 / Emotiv / Robots+CogniFit
-comes later, for cross-session generalization). Extend this module
-with `find_robots_session_files` / `find_cognifit_session_files` when
-that phase starts, rather than guessing their shape now.
+and are out of scope for this module -- current focus is session 2 /
+Slackline / CGX (session 1 / Emotiv / Robots+CogniFit is a separate
+concern, for cross-session generalization). Extend this module with
+`find_robots_session_files` / `find_cognifit_session_files` if that
+phase is needed, rather than guessing their shape now.
 """
 
 from __future__ import annotations
@@ -96,9 +96,9 @@ def find_slackline_sessions(
     Returns an empty list if the subject has no SlacklineLvl<level>
     folder at all (subject didn't do this level -- expected, not an
     error). Normally returns exactly one session (one UnixSessionDate
-    folder per subject/level in the tree inspected this session), but
-    returns a list rather than assuming that, since nothing in the
-    dataset paper guarantees exactly one session per subject/level.
+    folder per subject/level in the tree inspected), but returns a list
+    rather than assuming that, since nothing in the dataset paper
+    guarantees exactly one session per subject/level.
     """
     task_dir = os.path.join(dataset_root, subject_id, f"SlacklineLvl{level}")
     if not os.path.isdir(task_dir):

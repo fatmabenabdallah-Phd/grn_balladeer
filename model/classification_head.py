@@ -50,16 +50,15 @@ class ClassificationHead(nn.Module):
     logits (ADHD/control). Softmax is left to the loss function
     (nn.CrossEntropyLoss expects raw logits) rather than applied here.
 
-    dropout: added this session (previously 0, i.e. no regularization
-    at all) -- motivated by the diagnosed pattern of non-trivial
-    in-sample learning (train-subject AUC rising 0.546->0.610) paired
-    with chance-level held-out generalization (val AUC ~0.48-0.49
-    across a full 5-fold CV), which is the classic signature of
+    dropout: regularization on the classification head (previously 0,
+    i.e. no regularization at all) -- motivated by the diagnosed
+    pattern of non-trivial in-sample learning (train-subject AUC rising
+    0.546->0.610) paired with chance-level held-out generalization (val
+    AUC ~0.48-0.49 across a full 5-fold CV), the classic signature of
     memorizing training-subject-specific idiosyncrasies rather than a
     genuinely generalizable signal. Ablation across lr/batch_size/
-    embedding_dim/loss-weights this session ruled those out as the
-    cause, making regularization (untested until now) the next most
-    likely lever.
+    embedding_dim/loss-weights ruled those out as the cause, making
+    regularization the next most likely lever.
     """
 
     def __init__(self, in_features: int, hidden_features: int = 32, n_classes: int = 2, dropout: float = 0.3):

@@ -33,14 +33,13 @@ from typing import Optional
 AUX_INPUT_DIM = 12   # 6 EDA + 6 behavioral
 
 # Must match GRNEncoder's ACTUAL pooled output dim used throughout this project.
-# CORRECTED this session: the real GRNEncoder config used everywhere so far
-# (hidden_channels=[16, 8] -> pooled dim = 2*8 = 16 after split_real_imag) produces
-# 16, NOT 64. The original default of 64 was validated only against a SIMULATED
-# z_eeg tensor, not real GRNEncoder output - confirmed by an independent real
-# end-to-end run this session (real GRN + real behavioral + real EDA all the way
-# through fusion) that 16 is the dimension that actually appears in practice.
-# If GRNEncoder's embedding_dim changes later, update this AND re-verify end-to-end
-# rather than assuming a round number is correct.
+# The real GRNEncoder config (hidden_channels=[16, 8] -> pooled dim = 2*8 = 16
+# after split_real_imag) produces 16, NOT 64. An earlier default of 64 was
+# validated only against a SIMULATED z_eeg tensor, not real GRNEncoder output;
+# a real end-to-end run (real GRN + real behavioral + real EDA through fusion)
+# confirmed that 16 is the dimension that actually appears in practice.
+# If GRNEncoder's embedding_dim changes later, update this AND re-verify
+# end-to-end rather than assuming a round number is correct.
 DEFAULT_HIDDEN_DIM = 16
 
 

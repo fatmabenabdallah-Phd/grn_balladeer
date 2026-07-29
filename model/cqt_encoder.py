@@ -3,7 +3,7 @@ grn_balladeer.model.cqt_encoder
 ==================================
 Module 4 — CQT harmonic encoder.
 
-ARCHITECTURAL FINDING (empirically confirmed this session): a CQT down
+ARCHITECTURAL NOTE: a CQT down
 to fmin=1 Hz at bins_per_octave=12 (Q~16.8) needs ~16.8s of temporal
 context to build its lowest-frequency kernel — far longer than a single
 stimulus-locked epoch (~1.2s here). Computing the CQT independently per

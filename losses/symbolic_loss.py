@@ -80,13 +80,13 @@ def symbolic_implication_loss(
     determine_rule_direction.
 
     mu_ij: (n_pairs,) in [0, 1] for a single sample, OR (B, n_pairs) for
-        a batch (added this session for the vectorized train_epoch
-        path). confidence: scalar, (n_pairs,)-broadcastable for the
-        single-sample case, or (B,) for the batched case -- in the
-        batched case confidence is unsqueezed to (B, 1) here before
-        multiplying, since mu_ij * confidence would otherwise try to
-        broadcast (B, n_pairs) against (B,) directly, which fails/
-        misaligns rather than broadcasting per-sample as intended.
+        a batch (for the vectorized train_epoch path). confidence:
+        scalar, (n_pairs,)-broadcastable for the single-sample case, or
+        (B,) for the batched case -- in the batched case confidence is
+        unsqueezed to (B, 1) here before multiplying, since mu_ij *
+        confidence would otherwise try to broadcast (B, n_pairs)
+        against (B,) directly, which fails/misaligns rather than
+        broadcasting per-sample as intended.
     """
     if direction not in ("direct", "inverse"):
         raise ValueError(f"symbolic_implication_loss: direction must be 'direct'/'inverse', got '{direction}'")

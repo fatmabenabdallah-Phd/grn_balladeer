@@ -5,22 +5,20 @@ EEGNet (Lawhern et al. 2018, "EEGNet: A Compact Convolutional Network
 for EEG-based Brain-Computer Interfaces") -- the standard lightweight
 CNN reference architecture for small-sample EEG classification.
 
-Motivation for adding this now: EEG-TACT (Cardenas-Pena, Technologies
-2026), a CONFIRMED subject-disjoint (patient-independent, stratified
-group CV) study on the Nasrabadi IEEE DataPort ADHD dataset (also
-N=121, comparable size to our BALLADEER cohort), uses an EEGNet-style
-convolutional embedding as its backbone and reports 87.5% subject-level
-accuracy -- a genuine, verified data point (not a sample-level-leakage
-artifact) that our own GRN/TCN architectures have not come close to on
-BALLADEER. EEGNet's core design difference from our lightweight TCN
-(Section on the lightweight architecture, this session): EEGNet learns
+Motivation: EEG-TACT (Cardenas-Pena, Technologies 2026), a confirmed
+subject-disjoint (patient-independent, stratified group CV) study on
+the Nasrabadi IEEE DataPort ADHD dataset (also N=121, comparable size
+to our BALLADEER cohort), uses an EEGNet-style convolutional embedding
+as its backbone and reports 87.5% subject-level accuracy -- a genuine,
+verified data point (not a sample-level-leakage artifact) that our own
+GRN/TCN architectures have not come close to on BALLADEER. EEGNet's
+core design difference from our lightweight TCN: EEGNet learns
 SPATIAL (cross-channel) filters JOINTLY with temporal filters via a
 depthwise convolution across the channel dimension, rather than
 processing each channel independently before a separate, fixed
 graph-aggregation step. This is a genuine architectural difference,
-not a cosmetic one, and is the one concrete lead this session's
-literature search turned up that is backed by a verified subject-level
-result on a comparably-sized cohort.
+not a cosmetic one, and is backed by a verified subject-level result
+on a comparably-sized cohort.
 
 Standard hyperparameters below (F1=8, D=2, F2=16, kernel_length=64,
 dropout=0.5) are Lawhern et al.'s own defaults, not re-derived here --

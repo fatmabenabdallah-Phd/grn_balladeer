@@ -1,8 +1,8 @@
 """
 grn_balladeer/training/train_epoch_dual_branch_with_reconstruction.py
 =========================================================================
-Extends train_epoch_dual_branch.py (Module 9) with the auxiliary-branch
-reconstruction loss from the user's hand-sketched schema:
+Extends train_epoch_dual_branch.py (Module 9) with an auxiliary-branch
+reconstruction loss, following this schema:
 
     Modality1 (EEG) -> Input1 -> Encoder1 --------\
                                                      -> Fit -> Classify -> L_entropy
@@ -12,8 +12,8 @@ reconstruction loss from the user's hand-sketched schema:
     Triplet loss: touches Encoder2's embedding AND the joint (Fit) embedding
 
 This was never implemented in the original train_epoch_dual_branch.py
-(confirmed by direct inspection this session) -- that version has no
-decoder/reconstruction path at all. This variant adds:
+-- that version has no decoder/reconstruction path at all. This
+variant adds:
   - AuxBranchDecoder reconstructing the raw 12-dim aux vector from
     Encoder2's embedding (z_aux), with an MSE reconstruction loss
     (lambda4 * L_recon), added to the existing total_loss terms.
