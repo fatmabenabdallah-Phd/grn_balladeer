@@ -263,3 +263,43 @@ def build_subject_dataset_biciv2a(
         dataset.append((X_i, L_norm_i))
 
     return dataset, labels
+
+
+def extract_raw_trials_biciv2a(
+    npz_path: str,
+    sfreq: float = SFREQ_HZ,
+    mi_window_s: float = 4.0,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Returns raw (non-CQT, non-graph) EEG trial arrays and labels for
+    the SAME clean left/right trials build_subject_dataset_biciv2a
+    would build a graph for -- same cue-position extraction, same
+    artifact exclusion, same [cue, cue+mi_window_s] window.
+
+    Exists so eval.baselines.extract_band_power_features (which expects
+    a plain (n_trials, n_channels, n_samples) array) can compute a
+    Random Forest baseline on EXACTLY the trials GRN sees, rather than a
+    separately re-run extraction that could silently diverge (different
+    trial count, different window) and make the GRN-vs-RF comparison
+    unfair without anyone noticing -- the same concern build_dataset.py's
+    own return_epochs=True option was built to address for BALLADEER.
+
+    Returns (raw_trials, labels): raw_trials shape (n_trials,
+    n_channels, n_samples), labels shape (n_trials,), 0=left/1=right,
+    same order as build_subject_dataset_biciv2a's own return.
+    """
+    cue_positions, labels, _ = extract_binary_trials(npz_path)
+    if len(cue_positions) == 0:
+        raise ValueError(f"extract_raw_trials_biciv2a: no clean left/right trials found in {npz_path}")
+
+    raw = np.load(npz_path, allow_pickle=True)
+    s = raw["s"]
+    n_channels = len(BICIV2A_CHANNELS)
+    channel_data = s[:, :n_channels].T  # (n_channels, n_samples)
+
+    window_samples = int(round(mi_window_s * sfreq))
+    trials = np.stack([
+        channel_data[:, cue_sample:cue_sample + window_samples]
+        for cue_sample in cue_positions
+    ])  # (n_trials, n_channels, n_samples)
+
+    return trials, labels
