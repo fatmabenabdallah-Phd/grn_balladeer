@@ -77,7 +77,7 @@ def load_tdbrain_raw_epochs(
     bdf_path: str,
     window_samples: int = TDBRAIN_WINDOW_SAMPLES,
     apply_ica: bool = True,
-    ica_n_components: int = 15,
+    ica_n_components: float = 0.999999,
     ica_random_state: int = 42,
 ) -> "tuple[np.ndarray, dict]":
     """Loads one subject's BDF recording via MNE, optionally applies
@@ -93,6 +93,20 @@ def load_tdbrain_raw_epochs(
     channel selection only, no artifact removal -- kept for direct
     before/after comparison against previously-obtained results, not
     as a recommended default going forward.
+
+    ica_n_components: a FRACTION of explained variance (default
+    0.999999, MNE's own convention for "keep effectively all real
+    signal, drop only numerical noise"), NOT a fixed integer count.
+    A first attempt with a fixed n_components=15 produced a
+    RuntimeWarning on most subjects ("ratio between the largest and
+    smallest variances is too large (> 1e6)"), with the safe integer
+    ceiling MNE itself suggested varying wildly by subject (as low as
+    3, as high as 14) -- meaning a fixed count is unstable for some
+    subjects and needlessly conservative for others. The
+    variance-fraction convention lets MNE select the actual rank of
+    each subject's own data automatically, rather than assuming every
+    subject's 26-channel recording has the same effective
+    dimensionality.
 
     Returns (epochs, ica_report) where epochs has shape
     (n_epochs, 26, window_samples), and ica_report is None if
