@@ -72,8 +72,25 @@ def build_tdbrain_label_df(participants_xlsx_path: str, min_age: float = 18.0) -
           f"{(df_dedup['label'] == 0).sum()} HEALTHY "
           f"(total {len(df_dedup)})")
 
-    label_df = df_dedup.rename(columns={"TDBRAIN_ID": "user_id"})[
-        ["user_id", "label", "age", "gender"]
+    label_df = df_dedup.rename(columns={"TDBRAIN_ID": "user_id", "gender": "sex"})[
+        ["user_id", "label", "age", "sex"]
     ].reset_index(drop=True)
 
-    return label_df
+    # age_bin: required by training.cross_validation.stratified_subject_kfold
+    # (stratifies jointly on label + sex + age_bin). BALLADEER's own
+    # age_bin convention (data/labels.py) uses child-specific bins
+    # (6-9, 10-12, 13-15, 16-18) that do not apply to TDBRAIN's adult-only
+    # population (18.0-82.7 after the age >= 18 restriction above) --
+    # decade-based bins used instead, appropriate for this age range.
+    label_df["age_bin"] = pd.cut(
+        label_df["age"],
+        bins=[17, 30, 45, 60, 100],
+        labels=["18-30", "31-45", "46-60", "61+"],
+    )
+    if label_df["age_bin"].isna().any():
+        raise ValueError(
+            "build_tdbrain_label_df: age_bin has NaN values -- check that "
+            "all ages fall within [17, 100), the bin edges used above."
+        )
+
+    return label_df[["user_id", "label", "sex", "age", "age_bin"]]
