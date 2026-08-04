@@ -9,10 +9,25 @@ File structure (fully deterministic BIDS, unlike the CGX/Emotiv
 datasets elsewhere in this project, which needed a tolerant glob):
   <dataset_root>/sub-<ID>/ses-1/eeg/sub-<ID>_ses-1_task-<TASK>_eeg.bdf
 
-26 real EEG channels (10-20/10-10, modern nomenclature) -- 6 auxiliary
-channels (EOG/ECG/EMG) are explicitly excluded, not just ignored, since
-including them would corrupt any connectivity/band-power feature
-computed across "all channels in the file."
+26 real EEG channels (10-20/10-10, modern nomenclature). 6 auxiliary
+channels (EOG/ECG/EMG) are RETAINED through loading and correctly
+typed (not immediately dropped), since preprocessing.ica.
+run_ica_artifact_removal needs the real EOG channels (VPVA/VNVB,
+HPHL/HNHR) to detect and remove blink/eye-movement components before
+they are dropped for downstream feature extraction. This differs from
+an earlier version of this module, which excluded all 6 auxiliary
+channels immediately at load time and applied no artifact removal at
+all -- a gap identified and closed in this revision, reusing
+preprocessing.ica unchanged rather than reimplementing ICA logic here.
+
+Unlike BALLADEER's CGX system (whose nominal EOG reference was found
+silently non-functional throughout that project), TDBRAIN's VPVA/VNVB/
+HPHL/HNHR channels are expected to carry a genuine EOG signal (no
+evidence of a dead reference found in this dataset so far) -- so the
+standard find_bads_eog() path in preprocessing.ica should be the one
+actually used here, not its frontal-proxy fallback. This is verified
+per-subject at runtime by run_ica_artifact_removal's own dead-reference
+check, not assumed.
 """
 
 from __future__ import annotations
@@ -22,12 +37,16 @@ from typing import List, Optional
 import numpy as np
 import mne
 
+from grn_balladeer.preprocessing.ica import run_ica_artifact_removal
+
 TDBRAIN_EEG_CHANNELS = [
     "Fp1", "Fp2", "F7", "F3", "Fz", "F4", "F8", "FC3", "FCz", "FC4",
     "T7", "C3", "Cz", "C4", "T8", "CP3", "CPz", "CP4",
     "P7", "P3", "Pz", "P4", "P8", "O1", "Oz", "O2",
 ]
-TDBRAIN_AUX_CHANNELS = ["VPVA", "VNVB", "HPHL", "HNHR", "Erbs", "Mass"]
+TDBRAIN_EOG_CHANNELS = ["VPVA", "VNVB", "HPHL", "HNHR"]
+TDBRAIN_ECG_CHANNELS = ["Erbs"]
+TDBRAIN_EMG_CHANNELS = ["Mass"]
 TDBRAIN_SFREQ = 500.0
 TDBRAIN_WINDOW_SAMPLES = 2000  # 4.0s at 500Hz, matching this project's Nasrabadi epoching
 
@@ -54,17 +73,62 @@ def find_tdbrain_subject_file(dataset_root: str, user_id: str, task: str = "rest
     return path if os.path.isfile(path) else None
 
 
-def load_tdbrain_raw_epochs(bdf_path: str, window_samples: int = TDBRAIN_WINDOW_SAMPLES) -> np.ndarray:
-    """Loads one subject's BDF recording via MNE, picks ONLY the 26 real
-    EEG channels by name (drops EOG/ECG/EMG/Status explicitly rather
-    than relying on channel-type auto-detection, since the Status
-    trigger channel in resting recordings is present but entirely
-    empty and should not silently leak into a "pick all EEG-typed
-    channels" call), and splits into non-overlapping windows.
+def load_tdbrain_raw_epochs(
+    bdf_path: str,
+    window_samples: int = TDBRAIN_WINDOW_SAMPLES,
+    apply_ica: bool = True,
+    ica_n_components: int = 15,
+    ica_random_state: int = 42,
+) -> "tuple[np.ndarray, dict]":
+    """Loads one subject's BDF recording via MNE, optionally applies
+    ICA-based ocular-artifact removal (reusing preprocessing.ica.
+    run_ica_artifact_removal unchanged), THEN picks only the 26 real
+    EEG channels (dropping EOG/ECG/EMG/Status only after ICA has had a
+    chance to use the EOG channels), and splits into non-overlapping
+    windows.
 
-    Returns (n_epochs, 26, window_samples).
+    apply_ica: if True (default), loads with EOG/ECG/EMG channels
+    correctly typed, runs run_ica_artifact_removal, then drops them.
+    If False, reproduces the earlier (pre-ICA) behavior exactly --
+    channel selection only, no artifact removal -- kept for direct
+    before/after comparison against previously-obtained results, not
+    as a recommended default going forward.
+
+    Returns (epochs, ica_report) where epochs has shape
+    (n_epochs, 26, window_samples), and ica_report is None if
+    apply_ica=False, else the dict returned by run_ica_artifact_removal
+    (method used, number of components excluded, whether the EOG
+    reference was found dead) -- callers should log/aggregate this
+    across subjects rather than discard it, since a dead-reference
+    finding here would be as reportable as it was for BALLADEER.
     """
     raw = mne.io.read_raw_bdf(bdf_path, preload=True, verbose=False)
+
+    ica_report = None
+    if apply_ica:
+        ch_type_map = {}
+        for ch in TDBRAIN_EOG_CHANNELS:
+            if ch in raw.ch_names:
+                ch_type_map[ch] = "eog"
+        for ch in TDBRAIN_ECG_CHANNELS:
+            if ch in raw.ch_names:
+                ch_type_map[ch] = "ecg"
+        for ch in TDBRAIN_EMG_CHANNELS:
+            if ch in raw.ch_names:
+                ch_type_map[ch] = "emg"
+        if ch_type_map:
+            raw.set_channel_types(ch_type_map, verbose=False)
+
+        # ICA needs a mild high-pass and benefits from an average-ish
+        # reference; apply a standard 1-45Hz bandpass here (matching
+        # this project's other datasets' preprocessing) since nothing
+        # upstream of this function does so for TDBRAIN otherwise.
+        raw.filter(l_freq=1.0, h_freq=45.0, verbose=False)
+
+        raw, ica_report = run_ica_artifact_removal(
+            raw, n_components=ica_n_components, random_state=ica_random_state
+        )
+
     raw.pick(TDBRAIN_EEG_CHANNELS)  # explicit whitelist, not exclude()
     data = raw.get_data()  # (26, n_samples), already in the order of TDBRAIN_EEG_CHANNELS
     n_samples = data.shape[1]
@@ -77,7 +141,7 @@ def load_tdbrain_raw_epochs(bdf_path: str, window_samples: int = TDBRAIN_WINDOW_
     trimmed = data[:, : n_epochs * window_samples]
     epochs = trimmed.reshape(len(TDBRAIN_EEG_CHANNELS), n_epochs, window_samples)
     epochs = np.transpose(epochs, (1, 0, 2))  # (n_epochs, 26, window_samples)
-    return epochs
+    return epochs, ica_report
 
 
 def extract_band_power_features(epochs: np.ndarray, sfreq: float = TDBRAIN_SFREQ) -> np.ndarray:
@@ -157,17 +221,25 @@ def load_all_subjects_tdbrain(
     task: str = "restEC",
     feature_type: str = "band_power",
     metric: str = "plv",
+    apply_ica: bool = True,
 ):
-    """Full loop over label_df's subjects: loads EEG, extracts the
+    """Full loop over label_df's subjects: loads EEG (optionally via ICA
+    artifact removal, see load_tdbrain_raw_epochs), extracts the
     requested feature type, aggregates to one row per subject.
 
-    Returns (X, y, subject_ids, failed_subjects) -- failed_subjects is
-    a list of (user_id, reason) for subjects whose file was missing or
-    failed to load, so callers can report coverage honestly rather
-    than silently dropping subjects.
+    Returns (X, y, subject_ids, failed_subjects, ica_reports) --
+    failed_subjects is a list of (user_id, reason) for subjects whose
+    file was missing or failed to load, so callers can report coverage
+    honestly rather than silently dropping subjects. ica_reports is a
+    dict {user_id: report} (None values if apply_ica=False) -- callers
+    should check how many subjects had eog_reference_was_dead=True
+    across the cohort and report this explicitly if non-zero, the same
+    way BALLADEER's dead-EOG-reference finding was reported rather than
+    silently absorbed into a "cleaning" step.
     """
     features_by_subject = {}
     failed_subjects = []
+    ica_reports = {}
 
     for _, row in label_df.iterrows():
         user_id = row["user_id"]
@@ -176,7 +248,10 @@ def load_all_subjects_tdbrain(
             failed_subjects.append((user_id, "fichier introuvable"))
             continue
         try:
-            epochs = load_tdbrain_raw_epochs(bdf_path, TDBRAIN_WINDOW_SAMPLES)
+            epochs, ica_report = load_tdbrain_raw_epochs(
+                bdf_path, TDBRAIN_WINDOW_SAMPLES, apply_ica=apply_ica
+            )
+            ica_reports[user_id] = ica_report
             if feature_type == "band_power":
                 features = extract_band_power_features(epochs)
             elif feature_type == "connectivity":
@@ -192,4 +267,4 @@ def load_all_subjects_tdbrain(
     label_lookup = label_df.set_index("user_id")["label"]
     y = np.array([label_lookup.loc[s] for s in subject_ids])
 
-    return X, y, subject_ids, failed_subjects
+    return X, y, subject_ids, failed_subjects, ica_reports
