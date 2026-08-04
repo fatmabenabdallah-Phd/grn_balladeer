@@ -73,11 +73,41 @@ def find_tdbrain_subject_file(dataset_root: str, user_id: str, task: str = "rest
     return path if os.path.isfile(path) else None
 
 
+def _safe_n_components(raw: mne.io.Raw, picks: List[str], max_ratio: float = 1e6) -> int:
+    """Computes the largest number of PCA components such that the ratio
+    between the largest and smallest retained eigenvalue stays under
+    max_ratio -- the same criterion MNE's own ICA fit already uses
+    internally to emit its "unstable mixing matrix" RuntimeWarning
+    (confirmed against the exact wording of that warning, which reports
+    this same largest/smallest ratio).
+
+    MOTIVATION: an earlier attempt used a fixed variance-EXPLAINED
+    fraction (n_components=0.999999) instead of a fixed integer count,
+    on the theory that MNE's automatic rank selection would sidestep
+    the instability -- this did NOT work in practice (confirmed on the
+    real TDBRAIN cohort: the warning still fired on the large majority
+    of subjects, just with a different resulting component count each
+    time, since 99.9999% of variance still requires digging deep into
+    a near-numerical-noise tail on this data). Explicitly computing and
+    enforcing the actual eigenvalue-ratio constraint per subject, rather
+    than hoping a fixed fraction avoids it, directly targets what MNE's
+    own warning is measuring.
+    """
+    data = raw.get_data(picks=picks)
+    cov = np.cov(data)
+    eigenvalues = np.sort(np.linalg.eigvalsh(cov))[::-1]  # descending
+    eigenvalues = eigenvalues[eigenvalues > 0]
+    if len(eigenvalues) == 0:
+        return 1
+    ratios = eigenvalues[0] / eigenvalues
+    safe_count = int(np.sum(ratios < max_ratio))
+    return max(1, min(safe_count, len(eigenvalues)))
+
+
 def load_tdbrain_raw_epochs(
     bdf_path: str,
     window_samples: int = TDBRAIN_WINDOW_SAMPLES,
     apply_ica: bool = True,
-    ica_n_components: float = 0.999999,
     ica_random_state: int = 42,
 ) -> "tuple[np.ndarray, dict]":
     """Loads one subject's BDF recording via MNE, optionally applies
@@ -94,27 +124,22 @@ def load_tdbrain_raw_epochs(
     before/after comparison against previously-obtained results, not
     as a recommended default going forward.
 
-    ica_n_components: a FRACTION of explained variance (default
-    0.999999, MNE's own convention for "keep effectively all real
-    signal, drop only numerical noise"), NOT a fixed integer count.
-    A first attempt with a fixed n_components=15 produced a
-    RuntimeWarning on most subjects ("ratio between the largest and
-    smallest variances is too large (> 1e6)"), with the safe integer
-    ceiling MNE itself suggested varying wildly by subject (as low as
-    3, as high as 14) -- meaning a fixed count is unstable for some
-    subjects and needlessly conservative for others. The
-    variance-fraction convention lets MNE select the actual rank of
-    each subject's own data automatically, rather than assuming every
-    subject's 26-channel recording has the same effective
-    dimensionality.
+    ICA component count: computed PER SUBJECT via _safe_n_components
+    (see its own docstring) rather than a single fixed value shared
+    across the cohort -- TDBRAIN's per-subject eigenvalue ratio varies
+    widely (a safe integer ceiling of 3 for the worst-conditioned
+    subject observed vs. 24 for a well-conditioned one), so any single
+    fixed choice is either unstable for some subjects or needlessly
+    conservative for others.
 
     Returns (epochs, ica_report) where epochs has shape
     (n_epochs, 26, window_samples), and ica_report is None if
     apply_ica=False, else the dict returned by run_ica_artifact_removal
     (method used, number of components excluded, whether the EOG
-    reference was found dead) -- callers should log/aggregate this
-    across subjects rather than discard it, since a dead-reference
-    finding here would be as reportable as it was for BALLADEER.
+    reference was found dead, and this subject's computed safe
+    component count) -- callers should log/aggregate this across
+    subjects rather than discard it, since a dead-reference finding
+    here would be as reportable as it was for BALLADEER.
     """
     raw = mne.io.read_raw_bdf(bdf_path, preload=True, verbose=False)
 
@@ -139,9 +164,11 @@ def load_tdbrain_raw_epochs(
         # upstream of this function does so for TDBRAIN otherwise.
         raw.filter(l_freq=1.0, h_freq=45.0, verbose=False)
 
+        safe_n_components = _safe_n_components(raw, TDBRAIN_EEG_CHANNELS)
         raw, ica_report = run_ica_artifact_removal(
-            raw, n_components=ica_n_components, random_state=ica_random_state
+            raw, n_components=safe_n_components, random_state=ica_random_state
         )
+        ica_report["safe_n_components_computed"] = safe_n_components
 
     raw.pick(TDBRAIN_EEG_CHANNELS)  # explicit whitelist, not exclude()
     data = raw.get_data()  # (26, n_samples), already in the order of TDBRAIN_EEG_CHANNELS
