@@ -109,6 +109,7 @@ def load_tdbrain_raw_epochs(
     window_samples: int = TDBRAIN_WINDOW_SAMPLES,
     apply_ica: bool = True,
     ica_random_state: int = 42,
+    apply_csd: bool = False,
 ) -> "tuple[np.ndarray, dict]":
     """Loads one subject's BDF recording via MNE, optionally applies
     ICA-based ocular-artifact removal (reusing preprocessing.ica.
@@ -171,6 +172,25 @@ def load_tdbrain_raw_epochs(
         ica_report["safe_n_components_computed"] = safe_n_components
 
     raw.pick(TDBRAIN_EEG_CHANNELS)  # explicit whitelist, not exclude()
+
+    if apply_csd:
+        # Tests the reference/volume-conduction hypothesis for the
+        # unusually widespread connectivity effect found on TDBRAIN
+        # (58-95% of all channel pairs significant, Section on
+        # cross-dataset validation): a shared/common reference
+        # artifact (linked mastoids here) is a well-documented cause of
+        # spuriously widespread PLV connectivity across many channel
+        # pairs simultaneously, distinct from the batch-confound and
+        # movement-artifact hypotheses already tested and ruled out.
+        # Surface Laplacian (Current Source Density) removes the
+        # common-reference contribution by construction; reuses this
+        # project's existing BALLADEER CSD call
+        # (data.build_dataset_lightweight) unchanged. Requires
+        # electrode positions -- standard_1020 montage names match
+        # TDBRAIN's channel names directly (10-20/10-10 nomenclature).
+        raw.set_montage("standard_1020", on_missing="warn", verbose=False)
+        raw = mne.preprocessing.compute_current_source_density(raw, verbose=False)
+
     data = raw.get_data()  # (26, n_samples), already in the order of TDBRAIN_EEG_CHANNELS
     n_samples = data.shape[1]
     n_epochs = n_samples // window_samples
@@ -263,10 +283,17 @@ def load_all_subjects_tdbrain(
     feature_type: str = "band_power",
     metric: str = "plv",
     apply_ica: bool = True,
+    apply_csd: bool = False,
 ):
     """Full loop over label_df's subjects: loads EEG (optionally via ICA
-    artifact removal, see load_tdbrain_raw_epochs), extracts the
-    requested feature type, aggregates to one row per subject.
+    artifact removal and/or surface-Laplacian re-referencing, see
+    load_tdbrain_raw_epochs), extracts the requested feature type,
+    aggregates to one row per subject.
+
+    apply_csd: tests whether TDBRAIN's connectivity effect is driven by
+    a common-reference/volume-conduction artifact rather than genuine
+    signal -- see load_tdbrain_raw_epochs's own docstring for the full
+    rationale.
 
     Returns (X, y, subject_ids, failed_subjects, ica_reports) --
     failed_subjects is a list of (user_id, reason) for subjects whose
@@ -290,7 +317,7 @@ def load_all_subjects_tdbrain(
             continue
         try:
             epochs, ica_report = load_tdbrain_raw_epochs(
-                bdf_path, TDBRAIN_WINDOW_SAMPLES, apply_ica=apply_ica
+                bdf_path, TDBRAIN_WINDOW_SAMPLES, apply_ica=apply_ica, apply_csd=apply_csd
             )
             ica_reports[user_id] = ica_report
             if feature_type == "band_power":
