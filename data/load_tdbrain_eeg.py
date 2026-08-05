@@ -110,6 +110,7 @@ def load_tdbrain_raw_epochs(
     apply_ica: bool = True,
     ica_random_state: int = 42,
     apply_csd: bool = False,
+    apply_car: bool = False,
 ) -> "tuple[np.ndarray, dict]":
     """Loads one subject's BDF recording via MNE, optionally applies
     ICA-based ocular-artifact removal (reusing preprocessing.ica.
@@ -188,8 +189,33 @@ def load_tdbrain_raw_epochs(
         # (data.build_dataset_lightweight) unchanged. Requires
         # electrode positions -- standard_1020 montage names match
         # TDBRAIN's channel names directly (10-20/10-10 nomenclature).
+        #
+        # IMPORTANT CAVEAT: CSD is a spatial high-pass filter -- it
+        # suppresses ANY broadly-distributed component, artifact or
+        # genuine diffuse neural signal alike, not specifically a
+        # reference artifact. A collapse under CSD alone is therefore
+        # ambiguous between "this was a reference artifact" and "this
+        # was genuine but spatially broad neural signal". apply_car
+        # below (a DIFFERENT, less spatially aggressive reference
+        # scheme) is the discriminating test: if the effect collapses
+        # similarly under average reference too, that points toward a
+        # reference-specific explanation rather than CSD's own spatial
+        # selectivity being responsible for the collapse.
         raw.set_montage("standard_1020", on_missing="warn", verbose=False)
         raw = mne.preprocessing.compute_current_source_density(raw, verbose=False)
+    elif apply_car:
+        # Discriminating test alongside apply_csd (see its docstring):
+        # common average reference is a DIFFERENT reference scheme from
+        # TDBRAIN's delivered linked-mastoid reference, but far less
+        # spatially aggressive than CSD (it does not suppress broad
+        # neural patterns the way CSD's spatial high-pass does). If the
+        # widespread connectivity effect collapses similarly under CAR,
+        # that implicates the reference scheme specifically rather than
+        # CSD's own spatial-frequency selectivity; if CAR preserves the
+        # effect while CSD alone collapses it, that instead points
+        # toward a genuinely broad neural signal that CSD's spatial
+        # filtering removes as a side effect, not a reference artifact.
+        raw.set_eeg_reference("average", ch_type="eeg", verbose=False)
 
     data = raw.get_data()  # (26, n_samples), already in the order of TDBRAIN_EEG_CHANNELS
     n_samples = data.shape[1]
@@ -284,6 +310,7 @@ def load_all_subjects_tdbrain(
     metric: str = "plv",
     apply_ica: bool = True,
     apply_csd: bool = False,
+    apply_car: bool = False,
 ):
     """Full loop over label_df's subjects: loads EEG (optionally via ICA
     artifact removal and/or surface-Laplacian re-referencing, see
@@ -294,6 +321,9 @@ def load_all_subjects_tdbrain(
     a common-reference/volume-conduction artifact rather than genuine
     signal -- see load_tdbrain_raw_epochs's own docstring for the full
     rationale.
+
+    apply_car: common average reference, the discriminating test
+    alongside apply_csd -- see load_tdbrain_raw_epochs's own docstring.
 
     Returns (X, y, subject_ids, failed_subjects, ica_reports) --
     failed_subjects is a list of (user_id, reason) for subjects whose
@@ -317,7 +347,8 @@ def load_all_subjects_tdbrain(
             continue
         try:
             epochs, ica_report = load_tdbrain_raw_epochs(
-                bdf_path, TDBRAIN_WINDOW_SAMPLES, apply_ica=apply_ica, apply_csd=apply_csd
+                bdf_path, TDBRAIN_WINDOW_SAMPLES, apply_ica=apply_ica,
+                apply_csd=apply_csd, apply_car=apply_car,
             )
             ica_reports[user_id] = ica_report
             if feature_type == "band_power":
